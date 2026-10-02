@@ -59,6 +59,7 @@ _G.C_Map = { GetBestMapForUnit = function(unit) assert(unit == "player"); return
 _G.GetZoneText = function() return "Dornogal|Core" end
 _G.GetInventoryItemID = function(unit, slot) assert(unit == "player"); return gear[slot] end
 _G.GetBuildInfo = function() return "1.60.1", "70170", "Oct 1 2026", 16001 end
+_G.GetLocale = function() return "enUS" end
 _G.InCombatLockdown = function() return inCombat end
 _G.issecretvalue = function(value) return secretValues[value] == true end
 _G.issecrettable = function(value) return secretTables[value] == true end
@@ -132,6 +133,73 @@ end
 chunk("MclarionWow", {})
 
 expectTrue(type(MclarionWow_BuildExport) == "function", "exports a testable snapshot builder")
+
+_G.C_Item = { GetItemInfo = function(itemId)
+    if itemId == 4242 then
+        return "Épée|Bright", "|Hitem:4242:0|h[Épée]|h", 4, 70, 60, "Weapon", "Sword", 1,
+            "INVTYPE_WEAPON", 135274, 12345, 2, 7, 1, 11, nil, false, "A brave blade."
+    end
+end }
+expectTrue(type(MclarionWow_BuildItemExport) == "function", "provides an item metadata export")
+if type(MclarionWow_BuildItemExport) == "function" then
+    local export, exportError = MclarionWow_BuildItemExport()
+    expectEqual(exportError, nil, "item metadata export resolves own bag items")
+    expectTrue(type(export) == "string" and export:find("MHWOWI1|forever|", 1, true) == 1 and
+        export:find("|enUS|", 1, true) ~= nil and
+        export:find("4242:C38970C3A9657C427269676874:", 1, true) ~= nil and
+        export:find("|Hitem:", 1, true) == nil,
+        "metadata export carries encoded name and all fields without raw markup")
+    local originalInfo = C_Item.GetItemInfo
+    local rootBefore = MclarionWowData
+    inCombat = true
+    export, exportError = MclarionWow_BuildItemExport()
+    expectTrue(export == nil and exportError:find("combat", 1, true) ~= nil,
+        "item export refuses combat")
+    inCombat = false
+    C_Item.GetItemInfo = function() return nil end
+    export, exportError = MclarionWow_BuildItemExport()
+    expectTrue(export == nil and exportError:find("cache", 1, true) ~= nil,
+        "uncached item names are not invented")
+    local protected = protectedSentinel()
+    secretValues[protected] = true
+    C_Item.GetItemInfo = function(id)
+        if id == 4242 then
+            return "Blade", "link", 1, 4, 1, "Weapon", "Sword", 1,
+                "INVTYPE_WEAPON", 42, 1, 2, 7, 1, 0, nil, false, protected
+        end
+    end
+    local safe
+    safe, export, exportError = pcall(MclarionWow_BuildItemExport)
+    expectTrue(safe and export == nil and exportError:find("protected", 1, true) ~= nil,
+        "protected item metadata is refused before string conversion")
+    C_Item.GetItemInfo = function(id)
+        if id == 4242 then
+            return "Blade", "link", nil, 4, 1, "Weapon", "Sword", 1,
+                "INVTYPE_WEAPON", 42, 1, 2, 7, 1, 0, nil, false, "Description"
+        end
+    end
+    export, exportError = MclarionWow_BuildItemExport()
+    expectTrue(export == nil and exportError:find("number", 1, true) ~= nil,
+        "missing numeric metadata cannot silently pass validation")
+    C_Item.GetItemInfo = originalInfo
+    local originalGearAPI = GetInventoryItemID
+    local guardedGearAPI = function() error("protected gear API was invoked") end
+    secretValues[guardedGearAPI] = true
+    _G.GetInventoryItemID = guardedGearAPI
+    safe, export, exportError = pcall(MclarionWow_BuildItemExport)
+    expectTrue(safe and export == nil and exportError:find("protected", 1, true) ~= nil,
+        "protected equipment API is refused before invocation")
+    _G.GetInventoryItemID = originalGearAPI
+    local originalLocaleAPI = GetLocale
+    local guardedLocaleAPI = function() error("protected locale API was invoked") end
+    secretValues[guardedLocaleAPI] = true
+    _G.GetLocale = guardedLocaleAPI
+    safe, export, exportError = pcall(MclarionWow_BuildItemExport)
+    expectTrue(safe and export == nil and exportError:find("protected", 1, true) ~= nil,
+        "protected locale API is refused before invocation")
+    _G.GetLocale = originalLocaleAPI
+    expectEqual(MclarionWowData, rootBefore, "manual item export leaves local persistence unchanged")
+end
 
 expectTrue(type(MclarionWow_ProbeBags) == "function", "provides an out-of-combat read-only bag probe")
 if type(MclarionWow_ProbeBags) == "function" then

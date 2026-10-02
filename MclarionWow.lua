@@ -258,6 +258,108 @@ function MclarionWow_BuildBagExport()
     return export, nil, guid
 end
 
+-- A separate, manually reviewed catalogue for the player's own observed IDs.
+-- Text is hex-encoded so item links/descriptions cannot alter the wire format.
+local function itemText(value, maxBytes)
+    if isSecret(value) or type(value) ~= "string" or #value > maxBytes or
+        value:find("[%c]") then return nil end
+    return (value:gsub(".", function(byte)
+        return string.format("%02X", string.byte(byte))
+    end))
+end
+
+function MclarionWow_BuildItemExport()
+    local report, totalsOrError = scanBags(true)
+    if not report then return nil, totalsOrError end
+    if isSecret(C_Item) or type(C_Item) ~= "table" or issecrettable(C_Item) then
+        return nil, "Item API is unavailable."
+    end
+    local getInfo = C_Item.GetItemInfo
+    if isSecret(getInfo) or isSecret(GetInventoryItemID) or isSecret(GetLocale) or
+        isSecret(GetServerTime) or isSecret(UnitGUID) or isSecret(GetBuildInfo) then
+        return nil, "Item export API is protected by the client."
+    end
+    if type(getInfo) ~= "function" or
+        type(GetInventoryItemID) ~= "function" or type(GetLocale) ~= "function" then
+        return nil, "Item API is unavailable."
+    end
+    local ids = {}
+    for id in pairs(totalsOrError) do ids[id] = true end
+    for slot = 1, 19 do
+        local id = GetInventoryItemID("player", slot)
+        if isSecret(id) then return nil, "Equipped item is protected by the client." end
+        if id ~= nil then
+            if not positiveInteger(id) or id > 2147483647 then
+                return nil, "Equipped item ID is invalid."
+            end
+            ids[id] = true
+        end
+    end
+    local sorted = {}
+    for id in pairs(ids) do sorted[#sorted + 1] = id end
+    if #sorted > 128 then return nil, "Too many distinct own items for one export." end
+    table.sort(sorted)
+
+    local timestamp, guid, locale = GetServerTime(), UnitGUID("player"), GetLocale()
+    local _, buildString = GetBuildInfo()
+    if isSecret(timestamp) or isSecret(guid) or isSecret(locale) or isSecret(buildString) then
+        return nil, "Item export metadata is protected by the client."
+    end
+    local build = tonumber(buildString)
+    if not positiveInteger(timestamp) or timestamp > 253402300799 or
+        type(guid) ~= "string" or #guid > 80 or not guid:match("^Player%-%d+%-%x+$") or
+        type(locale) ~= "string" or not locale:match("^[a-z][a-z][A-Z][A-Z]$") or
+        not positiveInteger(build) or build > 2147483647 then
+        return nil, "Item export metadata is invalid."
+    end
+    local entries = {}
+    for _, id in ipairs(sorted) do
+        local name, link, quality, level, minLevel, kind, subkind, stackLimit,
+            equipLoc, texture, sellPrice, classId, subclassId, bindType,
+            expansionId, setId, reagent, description = getInfo(id)
+        local values = { name, link, quality, level, minLevel, kind, subkind,
+            stackLimit, equipLoc, texture, sellPrice, classId, subclassId,
+            bindType, expansionId, setId, reagent, description }
+        for index = 1, 18 do
+            if isSecret(values[index]) then
+                return nil, "Item metadata is protected by the client."
+            end
+        end
+        if name ~= nil then
+            local text = {
+                itemText(name, 160), itemText(link, 512), itemText(kind, 160),
+                itemText(subkind, 160), itemText(equipLoc, 64), itemText(description, 512)
+            }
+            if not text[1] or text[1] == "" or not text[2] or not text[3] or
+                not text[4] or not text[5] or not text[6] then
+                return nil, "Item text is invalid."
+            end
+            local numbers = { quality, level, minLevel, stackLimit,
+                texture, sellPrice, classId, subclassId, bindType, expansionId }
+            for index = 1, 10 do
+                local number = numbers[index]
+                if not nonnegativeInteger(number) or number > 2147483647 then
+                    return nil, "Item number is invalid."
+                end
+            end
+            if setId ~= nil and (not nonnegativeInteger(setId) or setId > 2147483647) then
+                return nil, "Item set ID is invalid."
+            end
+            if type(reagent) ~= "boolean" then return nil, "Item reagent flag is invalid." end
+            entries[#entries + 1] = table.concat({
+                id, text[1], text[2], quality, level, minLevel, text[3], text[4],
+                stackLimit, text[5], texture, sellPrice, classId, subclassId,
+                bindType, expansionId, setId or "", reagent and "1" or "0", text[6]
+            }, ":")
+        end -- Uncached names remain unresolved IDs on the site.
+    end
+    if #entries == 0 then return nil, "Item names are not available from the client cache." end
+    local export = table.concat({ "MHWOWI1", "forever", string.format("%.0f", timestamp),
+        guid, string.format("%.0f", build), locale, table.concat(entries, ";") }, "|")
+    if #export > 32768 then return nil, "Item export is too large." end
+    return export, nil, guid
+end
+
 local function storageRoot()
     if type(issecretvalue) ~= "function" or type(issecrettable) ~= "function" then
         return nil, "Saved data protection checks are unavailable."
@@ -465,6 +567,18 @@ end
 
 SLASH_MCLARIONWOWBAGSEXPORT1 = "/mhwowbagsexport"
 SlashCmdList.MCLARIONWOWBAGSEXPORT = showBagExport
+
+SLASH_MCLARIONWOWITEMSEXPORT1 = "/mhwowitemsexport"
+SlashCmdList.MCLARIONWOWITEMSEXPORT = function()
+    if not window then createWindow() end
+    local ok, export, err = pcall(MclarionWow_BuildItemExport)
+    exportBox:SetText(ok and (export or "Item export unavailable: " .. (err or "unknown error")) or
+        "Item export unavailable: client refused the scan.")
+    window:Show()
+    exportBox:Show()
+    exportBox:SetFocus()
+    exportBox:HighlightText()
+end
 
 SLASH_MCLARIONWOWBAGS1 = "/mhwowbags"
 SlashCmdList.MCLARIONWOWBAGS = function()
