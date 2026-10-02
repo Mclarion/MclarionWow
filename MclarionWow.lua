@@ -4,6 +4,16 @@ local function isSecret(value)
     return type(issecretvalue) == "function" and issecretvalue(value)
 end
 
+local function combatStatus()
+    if type(issecretvalue) ~= "function" or type(issecrettable) ~= "function" then
+        return nil, "Protection checks are unavailable."
+    end
+    local value = InCombatLockdown()
+    if isSecret(value) then return nil, "Combat status is protected by the client." end
+    if type(value) ~= "boolean" then return nil, "Combat status is unavailable." end
+    return value
+end
+
 local function rejectSecret(label, value)
     if isSecret(value) then
         return nil, label .. " is protected by the client."
@@ -26,7 +36,9 @@ local function nonnegativeInteger(value)
 end
 
 function MclarionWow_BuildExport()
-    if InCombatLockdown() then
+    local combat, combatError = combatStatus()
+    if combat == nil then return nil, combatError end
+    if combat then
         return nil, "MclarionWow will not export while you are in combat."
     end
 
@@ -37,8 +49,14 @@ function MclarionWow_BuildExport()
     local _, classFile = UnitClass("player")
     local level = UnitLevel("player")
     local mapId
-    if C_Map and C_Map.GetBestMapForUnit then
-        mapId = C_Map.GetBestMapForUnit("player")
+    local map = C_Map
+    if isSecret(map) or (type(map) == "table" and issecrettable(map)) then
+        return nil, "Map API is protected by the client."
+    end
+    if type(map) == "table" then
+        local mapLookup = map.GetBestMapForUnit
+        if isSecret(mapLookup) then return nil, "Map API is protected by the client." end
+        if type(mapLookup) == "function" then mapId = mapLookup("player") end
     end
     local zoneText = GetZoneText()
     local _, buildString = GetBuildInfo()
@@ -66,42 +84,44 @@ function MclarionWow_BuildExport()
         end
     end
 
-    if not positiveInteger(serverTime) then
+    if not positiveInteger(serverTime) or serverTime > 253402300799 then
         return nil, "Server time is unavailable."
     end
-    if type(playerGuid) ~= "string" or not playerGuid:match("^Player%-") then
+    if type(playerGuid) ~= "string" or #playerGuid < 11 or #playerGuid > 77 or
+        not playerGuid:match("^Player%-[A-Za-z0-9%-]+$") then
         return nil, "A valid player GUID is unavailable."
     end
-    if type(playerName) ~= "string" or playerName == "" then
+    if type(playerName) ~= "string" or playerName == "" or #playerName > 80 then
         return nil, "Player name is unavailable."
     end
     if playerName:find("[%c]") then
         return nil, "Player name contains unsupported control characters."
     end
-    if type(realmName) ~= "string" or realmName == "" then
+    if type(realmName) ~= "string" or realmName == "" or #realmName > 80 then
         return nil, "Realm name is unavailable."
     end
     if realmName:find("[%c]") then
         return nil, "Realm name contains unsupported control characters."
     end
-    if type(classFile) ~= "string" or classFile == "" then
+    if type(classFile) ~= "string" or #classFile < 3 or #classFile > 20 or
+        not classFile:match("^[A-Z]+$") then
         return nil, "Player class is unavailable."
     end
-    if not positiveInteger(level) then
+    if not positiveInteger(level) or level > 2147483647 then
         return nil, "Player level must be positive."
     end
     if mapId == nil then
         mapId = 0
-    elseif not nonnegativeInteger(mapId) then
+    elseif not nonnegativeInteger(mapId) or mapId > 2147483647 then
         return nil, "Map ID is invalid."
     end
-    if type(zoneText) ~= "string" then
+    if type(zoneText) ~= "string" or #zoneText > 120 then
         return nil, "Zone name is unavailable."
     end
     if zoneText:find("[%c]") then
         return nil, "Zone name contains unsupported control characters."
     end
-    if not positiveInteger(build) then
+    if not positiveInteger(build) or build > 2147483647 then
         return nil, "Client build must be positive."
     end
 
@@ -113,13 +133,13 @@ function MclarionWow_BuildExport()
         end
         if itemId == nil then
             itemId = 0
-        elseif not nonnegativeInteger(itemId) then
+        elseif not nonnegativeInteger(itemId) or itemId > 2147483647 then
             return nil, "Inventory slot " .. slot .. " has an invalid item ID."
         end
         gearIds[slot] = tostring(itemId)
     end
 
-    return table.concat({
+    local export = table.concat({
         "MHWOW1",
         "forever",
         tostring(serverTime),
@@ -132,30 +152,32 @@ function MclarionWow_BuildExport()
         escapeText(zoneText),
         table.concat(gearIds, ","),
         tostring(build),
-    }, "|"), nil, playerGuid
+    }, "|")
+    if #export > 4096 then return nil, "Character export is too large." end
+    return export, nil, playerGuid
 end
 
--- Read-only compatibility probe. No item IDs, stacks, or bag state are saved
--- until the actual Forever client has been tested with its current APIs.
-function MclarionWow_ProbeBags()
-    if InCombatLockdown() then
+-- Shared, fail-closed scanner for the diagnostic and manual bag export.
+local function scanBags(collectTotals)
+    local combat, combatError = combatStatus()
+    if combat == nil then return nil, combatError end
+    if combat then
         return nil, "Bag probe is unavailable during combat."
     end
-    if type(issecretvalue) ~= "function" or type(issecrettable) ~= "function" then
-        return nil, "Bag protection checks are unavailable."
-    end
-    if type(C_Container) ~= "table" or issecrettable(C_Container) then
+    if isSecret(C_Container) or type(C_Container) ~= "table" or issecrettable(C_Container) then
         return nil, "Bag API is unavailable."
     end
-    if type(C_Container.GetContainerNumSlots) ~= "function" or
-        type(C_Container.GetContainerItemInfo) ~= "function" then
+    local getSlots, getInfo = C_Container.GetContainerNumSlots, C_Container.GetContainerItemInfo
+    if isSecret(getSlots) or isSecret(getInfo) or
+        type(getSlots) ~= "function" or type(getInfo) ~= "function" then
         return nil, "Bag API is unavailable."
     end
 
     local slotsTotal, occupied, distinct = 0, 0, 0
     local seen = {}
+    local totals = collectTotals and {} or nil
     for bag = 0, 4 do
-        local slots = C_Container.GetContainerNumSlots(bag)
+        local slots = getSlots(bag)
         if isSecret(slots) then
             return nil, "Bag slot count is protected by the client."
         end
@@ -164,7 +186,7 @@ function MclarionWow_ProbeBags()
         end
         slotsTotal = slotsTotal + slots
         for slot = 1, slots do
-            local item = C_Container.GetContainerItemInfo(bag, slot)
+            local item = getInfo(bag, slot)
             if isSecret(item) then
                 return nil, "Bag item is protected by the client."
             end
@@ -176,8 +198,16 @@ function MclarionWow_ProbeBags()
                 if isSecret(itemId) or isSecret(count) then
                     return nil, "Bag item value is protected by the client."
                 end
-                if not positiveInteger(itemId) or not positiveInteger(count) then
+                if not positiveInteger(itemId) or itemId > 2147483647 or
+                    not positiveInteger(count) or count > 2147483647 then
                     return nil, "Bag item value is invalid."
+                end
+                if totals then
+                    local total = (totals[itemId] or 0) + count
+                    if total > 2147483647 then
+                        return nil, "Bag item total is too large."
+                    end
+                    totals[itemId] = total
                 end
                 occupied = occupied + 1
                 if not seen[itemId] then
@@ -190,30 +220,164 @@ function MclarionWow_ProbeBags()
         end
     end
     return string.format("Bag probe: %d slots, %d occupied, %d distinct items. No bag data saved.",
-        slotsTotal, occupied, distinct)
+        slotsTotal, occupied, distinct), totals
+end
+
+function MclarionWow_ProbeBags()
+    local report, err = scanBags(false)
+    return report, err
+end
+
+function MclarionWow_BuildBagExport()
+    local report, totalsOrError = scanBags(true)
+    if not report then return nil, totalsOrError end
+    local timestamp = GetServerTime()
+    local guid = UnitGUID("player")
+    local _, buildString = GetBuildInfo()
+    if isSecret(timestamp) or isSecret(guid) or isSecret(buildString) then
+        return nil, "Bag export metadata is protected by the client."
+    end
+    if not positiveInteger(timestamp) or type(guid) ~= "string" or
+        #guid > 80 or not guid:match("^Player%-%d+%-%x+$") or
+        (type(buildString) ~= "string" and type(buildString) ~= "number") then
+        return nil, "Bag export metadata is unavailable."
+    end
+    local build = tonumber(buildString)
+    if not positiveInteger(build) or build > 2147483647 then
+        return nil, "Bag export build is invalid."
+    end
+    local ids, entries = {}, {}
+    for itemId in pairs(totalsOrError) do ids[#ids + 1] = itemId end
+    table.sort(ids)
+    for _, itemId in ipairs(ids) do
+        entries[#entries + 1] = string.format("%.0f:%.0f", itemId, totalsOrError[itemId])
+    end
+    local export = table.concat({ "MHWOWB1", "forever", string.format("%.0f", timestamp),
+        guid, table.concat(entries, ","), string.format("%.0f", build) }, "|")
+    if #export > 16000 then return nil, "Bag export is too large." end
+    return export, nil, guid
+end
+
+local function storageRoot()
+    if type(issecretvalue) ~= "function" or type(issecrettable) ~= "function" then
+        return nil, "Saved data protection checks are unavailable."
+    end
+    local data = MclarionWowData
+    if isSecret(data) or (type(data) == "table" and issecrettable(data)) then
+        return nil, "Saved data is protected by the client; it was not overwritten."
+    end
+    if data == nil then
+        data = { schema = 1, characters = {} }
+        MclarionWowData = data
+    end
+    if type(data) ~= "table" then
+        return nil, "Saved data has an unsupported format; it was not overwritten."
+    end
+    local schema = data.schema
+    if isSecret(schema) then
+        return nil, "Saved data schema is protected by the client; it was not overwritten."
+    end
+    if schema ~= 1 then
+        return nil, "Saved data has an unsupported format; it was not overwritten."
+    end
+    local characters = data.characters
+    if isSecret(characters) or (type(characters) == "table" and issecrettable(characters)) then
+        return nil, "Saved character data is protected by the client; it was not overwritten."
+    end
+    if type(characters) ~= "table" then
+        return nil, "Saved data has an unsupported format; it was not overwritten."
+    end
+    return data, nil, characters
+end
+
+local function validateHistory(snapshots, label)
+    local count = #snapshots
+    if count > 20 then
+        return nil, "Saved " .. label .. " history exceeds the limit; it was not overwritten."
+    end
+    local found = 0
+    for key, entry in pairs(snapshots) do
+        if isSecret(key) or isSecret(entry) or
+            (type(key) == "table" and issecrettable(key)) or
+            (type(entry) == "table" and issecrettable(entry)) then
+            return nil, "Saved " .. label .. " history is protected by the client; it was not overwritten."
+        end
+        if type(key) ~= "number" or key ~= math.floor(key) or key < 1 or key > count or
+            type(entry) ~= "string" then
+            return nil, "Saved " .. label .. " history has an unsupported format; it was not overwritten."
+        end
+        found = found + 1
+    end
+    if found ~= count then
+        return nil, "Saved " .. label .. " history has an unsupported format; it was not overwritten."
+    end
+    return count
 end
 
 local function saveSnapshot(guid, export)
-    if MclarionWowData == nil then
-        MclarionWowData = { schema = 1, characters = {} }
-    elseif type(MclarionWowData) ~= "table" or MclarionWowData.schema ~= 1 or
-        type(MclarionWowData.characters) ~= "table" then
-        return nil, "Saved data has an unsupported format; it was not overwritten."
+    local _, storageError, characters = storageRoot()
+    if storageError then return nil, storageError end
+    local snapshots = characters[guid]
+    if isSecret(snapshots) or (type(snapshots) == "table" and issecrettable(snapshots)) then
+        return nil, "Saved character history is protected by the client; it was not overwritten."
     end
-    local snapshots = MclarionWowData.characters[guid]
     if snapshots == nil then
         snapshots = {}
-        MclarionWowData.characters[guid] = snapshots
+        characters[guid] = snapshots
+    elseif type(snapshots) ~= "table" then
+        return nil, "Saved character history has an unsupported format; it was not overwritten."
     end
+    local count, historyError = validateHistory(snapshots, "character")
+    if historyError then return nil, historyError end
     -- Time alone is not a meaningful character change. Keep local history bounded
     -- even when the periodic capture runs for hours without gear/zone changes.
     local details = export:match("^MHWOW1|forever|%d+|(.*)$")
-    local previous = snapshots[#snapshots] and snapshots[#snapshots]:match("^MHWOW1|forever|%d+|(.*)$")
-    if snapshots[#snapshots] ~= export and (details == nil or details ~= previous) then
+    local last = snapshots[count]
+    local previous = last and last:match("^MHWOW1|forever|%d+|(.*)$")
+    if last ~= export and (details == nil or details ~= previous) then
         snapshots[#snapshots + 1] = export
         if #snapshots > 20 then
             table.remove(snapshots, 1)
         end
+    end
+    return true
+end
+
+local function saveBagSnapshot(guid, export)
+    local data, storageError = storageRoot()
+    if not data then return nil, storageError end
+    local bagMap = data.bags
+    if isSecret(bagMap) or (type(bagMap) == "table" and issecrettable(bagMap)) then
+        return nil, "Saved bag data is protected by the client; it was not overwritten."
+    end
+    if bagMap == nil then
+        bagMap = {}
+        data.bags = bagMap
+    end
+    if type(bagMap) ~= "table" then
+        return nil, "Saved bag data has an unsupported format; it was not overwritten."
+    end
+    local snapshots = bagMap[guid]
+    if isSecret(snapshots) or (type(snapshots) == "table" and issecrettable(snapshots)) then
+        return nil, "Saved bag history is protected by the client; it was not overwritten."
+    end
+    if snapshots == nil then
+        snapshots = {}
+        bagMap[guid] = snapshots
+    elseif type(snapshots) ~= "table" then
+        return nil, "Saved bag history has an unsupported format; it was not overwritten."
+    end
+    local details = export:match("^MHWOWB1|forever|%d+|(.*)$")
+    local count, historyError = validateHistory(snapshots, "bag")
+    if historyError then return nil, historyError end
+    local last = snapshots[count]
+    if not details then
+        return nil, "Saved bag history has an unsupported format; it was not overwritten."
+    end
+    local previous = last and last:match("^MHWOWB1|forever|%d+|(.*)$")
+    if details ~= previous then
+        snapshots[#snapshots + 1] = export
+        if #snapshots > 20 then table.remove(snapshots, 1) end
     end
     return true
 end
@@ -260,12 +424,14 @@ local function showExport()
         createWindow()
     end
 
-    local export, err, guid = MclarionWow_BuildExport()
-    if export then
-        local stored, storageError = saveSnapshot(guid, export)
-        exportBox:SetText(stored and export or "Storage unavailable: " .. storageError)
+    local ok, export, err, guid = pcall(MclarionWow_BuildExport)
+    if ok and export then
+        local savedOk, stored, storageError = pcall(saveSnapshot, guid, export)
+        exportBox:SetText(savedOk and stored and export or "Storage unavailable: " ..
+            (savedOk and (storageError or "unknown error") or "client refused to save."))
     else
-        exportBox:SetText("Export unavailable: " .. (err or "unknown error"))
+        exportBox:SetText("Export unavailable: " ..
+            (ok and (err or "unknown error") or "client refused the scan."))
     end
     window:Show()
     exportBox:Show()
@@ -275,6 +441,30 @@ end
 
 SLASH_MCLARIONWOW1 = "/mhwow"
 SlashCmdList.MCLARIONWOW = showExport
+
+local function showBagExport()
+    if not window then createWindow() end
+    local ok, export, err, guid = pcall(MclarionWow_BuildBagExport)
+    if ok and export then
+        local savedOk, stored, storageError = pcall(saveBagSnapshot, guid, export)
+        if savedOk and stored then
+            exportBox:SetText(export)
+        else
+            exportBox:SetText("Storage unavailable: " ..
+                (savedOk and (storageError or "unknown error") or "client refused to save."))
+        end
+    else
+        exportBox:SetText("Bag export unavailable: " ..
+            (ok and (err or "unknown error") or "client refused the scan."))
+    end
+    window:Show()
+    exportBox:Show()
+    exportBox:SetFocus()
+    exportBox:HighlightText()
+end
+
+SLASH_MCLARIONWOWBAGSEXPORT1 = "/mhwowbagsexport"
+SlashCmdList.MCLARIONWOWBAGSEXPORT = showBagExport
 
 SLASH_MCLARIONWOWBAGS1 = "/mhwowbags"
 SlashCmdList.MCLARIONWOWBAGS = function()
@@ -286,25 +476,40 @@ local captureFrame = CreateFrame("Frame")
 local inWorld = false
 local elapsed = 0
 local function captureLocally()
-    if not inWorld or InCombatLockdown() then return end
+    if not inWorld then return end
+    local combat = combatStatus()
+    if combat == nil or combat then return end
     local ok, export, _, guid = pcall(MclarionWow_BuildExport)
     if ok and export and guid then
-        saveSnapshot(guid, export)
+        pcall(saveSnapshot, guid, export)
     end
 end
 
+local function captureBagsLocally()
+    if not inWorld then return end
+    local combat = combatStatus()
+    if combat == nil or combat then return end
+    local ok, export, _, guid = pcall(MclarionWow_BuildBagExport)
+    if ok and export and guid then pcall(saveBagSnapshot, guid, export) end
+end
+
 for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "PLAYER_EQUIPMENT_CHANGED",
-    "ZONE_CHANGED_NEW_AREA", "PLAYER_REGEN_ENABLED" }) do
+    "ZONE_CHANGED_NEW_AREA", "PLAYER_REGEN_ENABLED", "BAG_UPDATE_DELAYED" }) do
     captureFrame:RegisterEvent(event)
 end
-captureFrame:SetScript("OnEvent", function(_, event)
+local function onEvent(_, event)
     if event == "PLAYER_ENTERING_WORLD" then inWorld = true end
-    captureLocally()
-end)
-captureFrame:SetScript("OnUpdate", function(_, delta)
+    if event ~= "BAG_UPDATE_DELAYED" then pcall(captureLocally) end
+    if event == "PLAYER_ENTERING_WORLD" or event == "BAG_UPDATE_DELAYED" or
+        event == "PLAYER_REGEN_ENABLED" then pcall(captureBagsLocally) end
+end
+captureFrame:SetScript("OnEvent", function(...) pcall(onEvent, ...) end)
+local function onUpdate(_, delta)
     elapsed = elapsed + delta
     if elapsed >= 300 then
         elapsed = 0
-        captureLocally()
+        pcall(captureLocally)
+        pcall(captureBagsLocally)
     end
-end)
+end
+captureFrame:SetScript("OnUpdate", function(...) pcall(onUpdate, ...) end)
