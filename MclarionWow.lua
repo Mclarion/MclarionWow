@@ -135,6 +135,64 @@ function MclarionWow_BuildExport()
     }, "|"), nil, playerGuid
 end
 
+-- Read-only compatibility probe. No item IDs, stacks, or bag state are saved
+-- until the actual Forever client has been tested with its current APIs.
+function MclarionWow_ProbeBags()
+    if InCombatLockdown() then
+        return nil, "Bag probe is unavailable during combat."
+    end
+    if type(issecretvalue) ~= "function" or type(issecrettable) ~= "function" then
+        return nil, "Bag protection checks are unavailable."
+    end
+    if type(C_Container) ~= "table" or issecrettable(C_Container) then
+        return nil, "Bag API is unavailable."
+    end
+    if type(C_Container.GetContainerNumSlots) ~= "function" or
+        type(C_Container.GetContainerItemInfo) ~= "function" then
+        return nil, "Bag API is unavailable."
+    end
+
+    local slotsTotal, occupied, distinct = 0, 0, 0
+    local seen = {}
+    for bag = 0, 4 do
+        local slots = C_Container.GetContainerNumSlots(bag)
+        if isSecret(slots) then
+            return nil, "Bag slot count is protected by the client."
+        end
+        if not nonnegativeInteger(slots) or slots > 120 then
+            return nil, "Bag slot count is unavailable."
+        end
+        slotsTotal = slotsTotal + slots
+        for slot = 1, slots do
+            local item = C_Container.GetContainerItemInfo(bag, slot)
+            if isSecret(item) then
+                return nil, "Bag item is protected by the client."
+            end
+            if type(item) == "table" then
+                if issecrettable(item) then
+                    return nil, "Bag item is protected by the client."
+                end
+                local itemId, count = item.itemID, item.stackCount
+                if isSecret(itemId) or isSecret(count) then
+                    return nil, "Bag item value is protected by the client."
+                end
+                if not positiveInteger(itemId) or not positiveInteger(count) then
+                    return nil, "Bag item value is invalid."
+                end
+                occupied = occupied + 1
+                if not seen[itemId] then
+                    seen[itemId] = true
+                    distinct = distinct + 1
+                end
+            elseif item ~= nil then
+                return nil, "Bag item has an unsupported format."
+            end
+        end
+    end
+    return string.format("Bag probe: %d slots, %d occupied, %d distinct items. No bag data saved.",
+        slotsTotal, occupied, distinct)
+end
+
 local function saveSnapshot(guid, export)
     if MclarionWowData == nil then
         MclarionWowData = { schema = 1, characters = {} }
@@ -217,6 +275,12 @@ end
 
 SLASH_MCLARIONWOW1 = "/mhwow"
 SlashCmdList.MCLARIONWOW = showExport
+
+SLASH_MCLARIONWOWBAGS1 = "/mhwowbags"
+SlashCmdList.MCLARIONWOWBAGS = function()
+    local ok, report, err = pcall(MclarionWow_ProbeBags)
+    print("MclarionWow: " .. (ok and (report or err) or "Bag probe unavailable."))
+end
 
 local captureFrame = CreateFrame("Frame")
 local inWorld = false

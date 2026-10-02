@@ -17,9 +17,34 @@ local function expectTrue(value, message)
     expectEqual(value == true, true, message)
 end
 
+local function protectedSentinel()
+    local function accessed() error("mock protected value was inspected") end
+    return setmetatable({}, {
+        __index = accessed,
+        __tostring = accessed,
+        __lt = accessed,
+        __le = accessed,
+        __add = accessed,
+        __concat = accessed,
+    })
+end
+
+local function sameData(left, right)
+    if type(left) ~= type(right) then return false end
+    if type(left) ~= "table" then return left == right end
+    for key, value in pairs(left) do
+        if not sameData(value, right[key]) then return false end
+    end
+    for key in pairs(right) do
+        if left[key] == nil then return false end
+    end
+    return true
+end
+
 local now = 1720000000
 local inCombat = false
 local secretValues = setmetatable({}, { __mode = "k" })
+local secretTables = setmetatable({}, { __mode = "k" })
 local gear = {}
 for slot = 1, 19 do gear[slot] = 1000 + slot end
 
@@ -36,6 +61,13 @@ _G.GetInventoryItemID = function(unit, slot) assert(unit == "player"); return ge
 _G.GetBuildInfo = function() return "1.60.1", "70170", "Oct 1 2026", 16001 end
 _G.InCombatLockdown = function() return inCombat end
 _G.issecretvalue = function(value) return secretValues[value] == true end
+_G.issecrettable = function(value) return secretTables[value] == true end
+_G.C_Container = {
+    GetContainerNumSlots = function(bag) return bag == 0 and 2 or 0 end,
+    GetContainerItemInfo = function(bag, slot)
+        if bag == 0 and slot == 1 then return { itemID = 4242, stackCount = 3 } end
+    end,
+}
 
 local frames = {}
 _G.UIParent = {}
@@ -100,6 +132,65 @@ end
 chunk("MclarionWow", {})
 
 expectTrue(type(MclarionWow_BuildExport) == "function", "exports a testable snapshot builder")
+
+expectTrue(type(MclarionWow_ProbeBags) == "function", "provides an out-of-combat read-only bag probe")
+if type(MclarionWow_ProbeBags) == "function" then
+    local report, bagError = MclarionWow_ProbeBags()
+    expectEqual(bagError, nil, "bag probe has no error with plain own-bag values")
+    expectTrue(type(report) == "string" and report:find("2 slots", 1, true) ~= nil and
+        report:find("1 occupied", 1, true) ~= nil and report:find("1 distinct", 1, true) ~= nil,
+        "bag probe reports counts only")
+    expectTrue(report:find("4242", 1, true) == nil, "bag probe does not expose item IDs")
+    inCombat = true
+    report, bagError = MclarionWow_ProbeBags()
+    expectEqual(report, nil, "bag probe refuses combat")
+    inCombat = false
+    local originalSlots = C_Container.GetContainerNumSlots
+    local protectedSlots = protectedSentinel()
+    secretValues[protectedSlots] = true
+    C_Container.GetContainerNumSlots = function() return protectedSlots end
+    local ok, protectedReport = pcall(MclarionWow_ProbeBags)
+    expectTrue(ok and protectedReport == nil, "mock secret slot count is rejected before arithmetic")
+    C_Container.GetContainerNumSlots = originalSlots
+    secretValues[protectedSlots] = nil
+    local originalInfo = C_Container.GetContainerItemInfo
+    local protectedInfo = protectedSentinel()
+    secretTables[protectedInfo] = true
+    C_Container.GetContainerItemInfo = function() return protectedInfo end
+    ok, protectedReport = pcall(MclarionWow_ProbeBags)
+    expectTrue(ok and protectedReport == nil, "mock secret item table is rejected before indexing")
+    C_Container.GetContainerItemInfo = originalInfo
+    secretTables[protectedInfo] = nil
+    local protectedId = protectedSentinel()
+    secretValues[protectedId] = true
+    C_Container.GetContainerItemInfo = function() return { itemID = protectedId, stackCount = 3 } end
+    ok, protectedReport = pcall(MclarionWow_ProbeBags)
+    expectTrue(ok and protectedReport == nil, "mock secret item ID is rejected before conversion")
+    C_Container.GetContainerItemInfo = originalInfo
+    secretValues[protectedId] = nil
+    local protectedCount = protectedSentinel()
+    secretValues[protectedCount] = true
+    C_Container.GetContainerItemInfo = function() return { itemID = 4242, stackCount = protectedCount } end
+    ok, protectedReport = pcall(MclarionWow_ProbeBags)
+    expectTrue(ok and protectedReport == nil, "mock secret stack count is rejected before arithmetic")
+    C_Container.GetContainerItemInfo = originalInfo
+    secretValues[protectedCount] = nil
+    C_Container.GetContainerItemInfo = function() return { itemID = 4242, stackCount = 0 } end
+    report, bagError = MclarionWow_ProbeBags()
+    expectEqual(report, nil, "invalid item count is rejected")
+    C_Container.GetContainerItemInfo = originalInfo
+    C_Container.GetContainerNumSlots = nil
+    report, bagError = MclarionWow_ProbeBags()
+    expectEqual(report, nil, "missing bag API does not fall back to unsafe calls")
+    C_Container.GetContainerNumSlots = originalSlots
+    expectTrue(type(SlashCmdList.MCLARIONWOWBAGS) == "function", "registers explicit bag probe command")
+    local storedBeforeProbe = MclarionWowData
+    MclarionWowData = { schema = 1, characters = { ["Player-1234-ABCDEF12"] = { "existing snapshot" } } }
+    local expectedStorage = { schema = 1, characters = { ["Player-1234-ABCDEF12"] = { "existing snapshot" } } }
+    SlashCmdList.MCLARIONWOWBAGS()
+    expectTrue(sameData(MclarionWowData, expectedStorage), "bag probe leaves nested saved data unchanged")
+    MclarionWowData = storedBeforeProbe
+end
 
 local expectedGear = {}
 for slot = 1, 19 do expectedGear[#expectedGear + 1] = tostring(1000 + slot) end

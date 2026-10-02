@@ -1,6 +1,6 @@
 # MclarionWow
 
-MclarionWow is a Forever-only, read-only character snapshot addon. Out of combat, it collects local snapshots when entering the world, when equipment or zone changes, after combat, and every five minutes. It deduplicates unchanged character data and keeps at most 20 snapshots per character in account-wide `MclarionWowData` SavedVariables. `/mhwow` still shows a fresh, selectable export for manual copy. The addon does not read bags or loot yet. It never automatically copies or sends data, inspects other players, or performs gameplay actions.
+MclarionWow is a Forever-only, read-only character snapshot addon. Out of combat, it collects local snapshots when entering the world, when equipment or zone changes, after combat, and every five minutes. It deduplicates unchanged character data and keeps at most 20 snapshots per character in account-wide `MclarionWowData` SavedVariables. `/mhwow` still shows a fresh, selectable export for manual copy. `/mhwowbags` is a **read-only compatibility probe**: it reports bag/slot counts but saves and exports no bag data. The addon does not collect loot. It never automatically copies or sends data, inspects other players, or performs gameplay actions.
 
 ## Use
 
@@ -13,7 +13,7 @@ MclarionWow is a Forever-only, read-only character snapshot addon. Out of combat
 
 No export is produced during combat. The addon also refuses to export if the client marks any snapshot value—including an inventory item ID—as secret.
 
-For each character, local history retains at most 20 distinct consecutive character states, dropping the oldest when full. A new timestamp alone does not create a history entry. Automatic capture is local only and skips combat and secret values. The site still needs a player-reviewed manual import; refreshing the page does not read game files. WoW flushes SavedVariables on its own save/reload/logout lifecycle, not at each timer tick. Do not edit or remove the SavedVariables file while WoW is running; restoration after a full client relaunch still needs testing.
+For each character, local history retains at most 20 distinct consecutive character states, dropping the oldest when full. A new timestamp alone does not create a history entry. Automatic capture is local only and skips combat and secret values. The site still needs a player-reviewed manual import; refreshing the page does not read game files. WoW flushes SavedVariables on its own save/reload/logout lifecycle, not at each timer tick. Do not edit or remove the SavedVariables file while WoW is running; restoration across a relaunch was observed on build 70170 but must be rechecked after client updates.
 
 ## Export format
 
@@ -34,7 +34,7 @@ The test uses mocked WoW APIs but executes the actual addon Lua file:
 lua5.4 tests/test_mclarion_wow.lua MclarionWow.lua
 ```
 
-It covers the export contract, validation, combat and secret-value refusal, manual UI, automatic local capture, deduplication, and bounded history.
+It covers the export contract, validation, combat and secret-value refusal, manual UI, automatic local capture, deduplication, bounded history, and the count-only bag probe. Mock secret sentinels trap premature field access; an in-client compatibility test is still required.
 
 ## Manual client test checklist
 
@@ -48,6 +48,7 @@ Use only a compatible Forever client whose interface number is `16001`:
 6. Leave combat and rerun `/mhwow`; verify a fresh snapshot is shown.
 7. Verify Escape closes the export window.
 8. Run `/reload`, reopen `/mhwow`, and confirm the prior character history remains in `MclarionWowData` after a clean logout; inspect only this addon's SavedVariables entry, not account credentials or other addon data.
+9. Out of combat, run `/mhwowbags`. Expect a chat message with counts of bag slots, occupied slots, and distinct item types, **not** item IDs. If it says an API or value is unavailable/protected, stop and report only the message. In combat it should refuse. This probe changes no SavedVariables and does not transfer inventory to the website.
 
 ## Safety and policy caveats
 
