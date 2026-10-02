@@ -69,6 +69,15 @@ _G.C_Container = {
         if bag == 0 and slot == 1 then return { itemID = 4242, stackCount = 3 } end
     end,
 }
+_G.Enum = { BankType = { Character = 1 } }
+_G.C_Bank = {
+    AreAnyBankTypesViewable = function() return true end,
+    CanViewBank = function(bankType) assert(bankType == Enum.BankType.Character); return true end,
+    FetchPurchasedBankTabData = function(bankType)
+        assert(bankType == Enum.BankType.Character)
+        return { { ID = 6 }, { ID = 7 } }
+    end,
+}
 
 local frames = {}
 _G.UIParent = {}
@@ -262,6 +271,90 @@ if type(MclarionWow_ProbeBags) == "function" then
     SlashCmdList.MCLARIONWOWBAGS()
     expectTrue(sameData(MclarionWowData, expectedStorage), "bag probe leaves nested saved data unchanged")
     MclarionWowData = storedBeforeProbe
+end
+
+expectTrue(type(MclarionWow_ProbeBank) == "function", "provides a manual count-only character bank probe")
+if type(MclarionWow_ProbeBank) == "function" then
+    local oldSlots, oldInfo = C_Container.GetContainerNumSlots, C_Container.GetContainerItemInfo
+    C_Container.GetContainerNumSlots = function(tab) return tab == 6 and 2 or tab == 7 and 1 or 0 end
+    C_Container.GetContainerItemInfo = function(tab, slot)
+        if tab == 6 and slot == 1 then return { itemID = 4242, stackCount = 3 } end
+        if tab == 7 and slot == 1 then return { itemID = 4242, stackCount = 1 } end
+    end
+    local rootBefore = MclarionWowData
+    MclarionWowData = { schema = 1, characters = { ["Player-1234-ABCDEF12"] = { "existing snapshot" } } }
+    local expectedStorage = { schema = 1, characters = { ["Player-1234-ABCDEF12"] = { "existing snapshot" } } }
+    local report, problem = MclarionWow_ProbeBank()
+    expectEqual(problem, nil, "viewable own character bank can be counted")
+    expectTrue(report and report:find("2 tabs", 1, true) and
+        report:find("3 slots", 1, true) and report:find("2 occupied", 1, true) and
+        report:find("1 distinct", 1, true) and not report:find("4242", 1, true),
+        "bank probe reports bounded counts without any item IDs")
+    expectTrue(sameData(MclarionWowData, expectedStorage), "bank probe leaves nested saved data unchanged")
+    expectTrue(type(SlashCmdList.MCLARIONWOWBANKPROBE) == "function", "registers manual bank probe command")
+    inCombat = true
+    report, problem = MclarionWow_ProbeBank()
+    expectTrue(report == nil and problem:find("combat", 1, true) ~= nil, "bank probe refuses combat")
+    inCombat = false
+    local oldCombat = InCombatLockdown
+    _G.InCombatLockdown = nil
+    local ok, missingReport, missingError = pcall(MclarionWow_ProbeBank)
+    expectTrue(ok and missingReport == nil and type(missingError) == "string" and
+        missingError:find("unavailable", 1, true) ~= nil,
+        "missing combat API fails closed without throwing")
+    local protectedCombatMethod = protectedSentinel()
+    secretValues[protectedCombatMethod] = true
+    _G.InCombatLockdown = protectedCombatMethod
+    ok, missingReport, missingError = pcall(MclarionWow_ProbeBank)
+    expectTrue(ok and missingReport == nil and type(missingError) == "string" and
+        missingError:find("protected", 1, true) ~= nil,
+        "protected combat API fails closed before invocation")
+    _G.InCombatLockdown = oldCombat
+    secretValues[protectedCombatMethod] = nil
+    local oldView = C_Bank.CanViewBank
+    C_Bank.CanViewBank = function() return false end
+    report, problem = MclarionWow_ProbeBank()
+    expectTrue(report == nil and problem:find("viewable", 1, true) ~= nil, "bank probe refuses closed bank")
+    C_Bank.CanViewBank = oldView
+    C_Bank.CanViewBank = nil
+    ok, missingReport, missingError = pcall(MclarionWow_ProbeBank)
+    expectTrue(ok and missingReport == nil and type(missingError) == "string" and
+        missingError:find("unavailable", 1, true) ~= nil,
+        "missing bank-view method fails closed without throwing")
+    C_Bank.CanViewBank = oldView
+    local oldTabs = C_Bank.FetchPurchasedBankTabData
+    C_Bank.FetchPurchasedBankTabData = function() return { { ID = 15 } } end
+    report, problem = MclarionWow_ProbeBank()
+    expectTrue(report == nil and problem:find("tab", 1, true) ~= nil, "account-bank tab ID is never scanned")
+    local scannedTabs = 0
+    C_Container.GetContainerNumSlots = function()
+        scannedTabs = scannedTabs + 1
+        return 0
+    end
+    C_Bank.FetchPurchasedBankTabData = function() return { [1] = { ID = 6 }, [3] = { ID = 15 } } end
+    ok, report, problem = pcall(MclarionWow_ProbeBank)
+    expectTrue(ok and report == nil and type(problem) == "string" and
+        problem:find("tab", 1, true) ~= nil, "sparse bank tabs fail closed")
+    expectEqual(scannedTabs, 0, "malformed tabs are rejected before scanning")
+    C_Container.GetContainerNumSlots = function(tab) return tab == 6 and 2 or tab == 7 and 1 or 0 end
+    local protected = protectedSentinel()
+    secretValues[protected] = true
+    C_Bank.FetchPurchasedBankTabData = function() return { { ID = protected } } end
+    ok, report, problem = pcall(MclarionWow_ProbeBank)
+    expectTrue(ok and report == nil and problem:find("protected", 1, true) ~= nil,
+        "protected bank-tab ID is refused before comparison")
+    secretValues[protected] = nil
+    C_Bank.FetchPurchasedBankTabData = oldTabs
+    C_Container.GetContainerItemInfo = function() return { itemID = 4242, stackCount = protected } end
+    secretValues[protected] = true
+    ok, report, problem = pcall(MclarionWow_ProbeBank)
+    expectTrue(ok and report == nil and problem:find("protected", 1, true) ~= nil,
+        "protected bank-item values fail closed")
+    secretValues[protected] = nil
+    C_Container.GetContainerItemInfo = oldInfo
+    C_Container.GetContainerNumSlots = oldSlots
+    expectTrue(sameData(MclarionWowData, expectedStorage), "bank probe failure leaves nested storage unchanged")
+    MclarionWowData = rootBefore
 end
 
 local originalCombatCheck = InCombatLockdown

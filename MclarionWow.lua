@@ -8,7 +8,10 @@ local function combatStatus()
     if type(issecretvalue) ~= "function" or type(issecrettable) ~= "function" then
         return nil, "Protection checks are unavailable."
     end
-    local value = InCombatLockdown()
+    local check = InCombatLockdown
+    if isSecret(check) then return nil, "Combat API is protected by the client." end
+    if type(check) ~= "function" then return nil, "Combat API is unavailable." end
+    local value = check()
     if isSecret(value) then return nil, "Combat status is protected by the client." end
     if type(value) ~= "boolean" then return nil, "Combat status is unavailable." end
     return value
@@ -226,6 +229,105 @@ end
 function MclarionWow_ProbeBags()
     local report, err = scanBags(false)
     return report, err
+end
+
+-- Manual count-only diagnostic for purchased tabs in the character's own viewable bank.
+-- Only aggregate counts leave this function; item IDs, per-item counts and snapshots do not.
+function MclarionWow_ProbeBank()
+    local combat, combatError = combatStatus()
+    if combat == nil then return nil, combatError end
+    if combat then return nil, "Bank probe is unavailable during combat." end
+
+    if isSecret(C_Bank) or type(C_Bank) ~= "table" or issecrettable(C_Bank) or
+        isSecret(Enum) or type(Enum) ~= "table" or issecrettable(Enum) or
+        isSecret(C_Container) or type(C_Container) ~= "table" or issecrettable(C_Container) then
+        return nil, "Bank API is unavailable or protected by the client."
+    end
+    local bankTypes = Enum.BankType
+    if isSecret(bankTypes) or type(bankTypes) ~= "table" or issecrettable(bankTypes) then
+        return nil, "Bank type is protected by the client."
+    end
+    local characterType = bankTypes.Character
+    if isSecret(characterType) then return nil, "Bank type is protected by the client." end
+    if not nonnegativeInteger(characterType) or characterType > 10 then
+        return nil, "Character bank type is unavailable."
+    end
+    local anyViewable, canView, fetchTabs = C_Bank.AreAnyBankTypesViewable,
+        C_Bank.CanViewBank, C_Bank.FetchPurchasedBankTabData
+    local getSlots, getInfo = C_Container.GetContainerNumSlots, C_Container.GetContainerItemInfo
+    if isSecret(anyViewable) or isSecret(canView) or isSecret(fetchTabs) or
+        isSecret(getSlots) or isSecret(getInfo) or
+        type(anyViewable) ~= "function" or type(canView) ~= "function" or
+        type(fetchTabs) ~= "function" or type(getSlots) ~= "function" or
+        type(getInfo) ~= "function" then
+        return nil, "Bank API is unavailable or protected by the client."
+    end
+    local any = anyViewable()
+    if isSecret(any) then return nil, "Bank visibility is protected by the client." end
+    if type(any) ~= "boolean" or not any then return nil, "No bank is viewable." end
+    local visible = canView(characterType)
+    if isSecret(visible) then return nil, "Bank visibility is protected by the client." end
+    if type(visible) ~= "boolean" or not visible then return nil, "Character bank is not viewable." end
+
+    local tabs = fetchTabs(characterType)
+    if isSecret(tabs) or type(tabs) ~= "table" or issecrettable(tabs) then
+        return nil, "Character bank tabs are unavailable or protected by the client."
+    end
+    local tabCount = 0
+    for key in next, tabs do
+        if isSecret(key) then return nil, "Character bank tab key is protected by the client." end
+        if not positiveInteger(key) or key > 9 then
+            return nil, "Character bank tabs are unsupported."
+        end
+        tabCount = tabCount + 1
+    end
+    local tabIds, scannedIds = {}, {}
+    for index = 1, tabCount do
+        local tab = tabs[index]
+        if tab == nil then return nil, "Character bank tabs are unsupported." end
+        if isSecret(tab) or type(tab) ~= "table" or issecrettable(tab) then
+            return nil, "Character bank tab is protected by the client."
+        end
+        local tabId = tab.ID
+        if isSecret(tabId) then return nil, "Character bank tab ID is protected by the client." end
+        -- Exact Forever 1.60.1 client BagIndex constants: character 6..14, account 15..23.
+        if not nonnegativeInteger(tabId) or tabId < 6 or tabId > 14 or tabIds[tabId] then
+            return nil, "Character bank tab ID is unsupported."
+        end
+        tabIds[tabId] = true
+        scannedIds[index] = tabId
+    end
+    local slotsTotal, occupied, distinct, seen = 0, 0, 0, {}
+    for index = 1, tabCount do
+        local tabId = scannedIds[index]
+        local slots = getSlots(tabId)
+        if isSecret(slots) then return nil, "Bank slot count is protected by the client." end
+        if not nonnegativeInteger(slots) or slots > 120 then
+            return nil, "Bank slot count is unavailable."
+        end
+        slotsTotal = slotsTotal + slots
+        for slot = 1, slots do
+            local item = getInfo(tabId, slot)
+            if isSecret(item) then return nil, "Bank item is protected by the client." end
+            if item ~= nil then
+                if type(item) ~= "table" or issecrettable(item) then
+                    return nil, "Bank item is protected by the client."
+                end
+                local itemId, count = item.itemID, item.stackCount
+                if isSecret(itemId) or isSecret(count) then
+                    return nil, "Bank item value is protected by the client."
+                end
+                if not positiveInteger(itemId) or itemId > 2147483647 or
+                    not positiveInteger(count) or count > 2147483647 then
+                    return nil, "Bank item value is invalid."
+                end
+                occupied = occupied + 1
+                if not seen[itemId] then seen[itemId] = true; distinct = distinct + 1 end
+            end
+        end
+    end
+    return string.format("Character bank probe: %d tabs, %d slots, %d occupied, %d distinct items. No bank data saved.",
+        tabCount, slotsTotal, occupied, distinct)
 end
 
 function MclarionWow_BuildBagExport()
@@ -584,6 +686,12 @@ SLASH_MCLARIONWOWBAGS1 = "/mhwowbags"
 SlashCmdList.MCLARIONWOWBAGS = function()
     local ok, report, err = pcall(MclarionWow_ProbeBags)
     print("MclarionWow: " .. (ok and (report or err) or "Bag probe unavailable."))
+end
+
+SLASH_MCLARIONWOWBANKPROBE1 = "/mhwowbankprobe"
+SlashCmdList.MCLARIONWOWBANKPROBE = function()
+    local ok, report, err = pcall(MclarionWow_ProbeBank)
+    print("MclarionWow: " .. (ok and (report or err) or "Bank probe unavailable."))
 end
 
 local captureFrame = CreateFrame("Frame")
