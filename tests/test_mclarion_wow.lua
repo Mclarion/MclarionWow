@@ -56,6 +56,10 @@ _G.CreateFrame = function(frameType, name, parent, template)
     function frame:EnableMouse() end
     function frame:RegisterForDrag() end
     function frame:SetScript(event, callback) self.scripts[event] = callback end
+    function frame:RegisterEvent(event)
+        self.events = self.events or {}
+        self.events[event] = true
+    end
     function frame:StartMoving() end
     function frame:StopMovingOrSizing() end
     function frame:SetAutoFocus() end
@@ -152,6 +156,28 @@ export, err = MclarionWow_BuildExport()
 expectEqual(export, nil, "secret gear ID blocks export")
 secretValues[originalItem] = nil
 
+local originalBuildInfo = _G.GetBuildInfo
+local protectedBuild = {}
+secretValues[protectedBuild] = true
+_G.GetBuildInfo = function() return "1.60.1", protectedBuild, "Oct 1 2026", 16001 end
+local buildOk, buildExport, buildError = pcall(MclarionWow_BuildExport)
+expectTrue(buildOk and buildExport == nil and
+    type(buildError) == "string" and buildError:find("protected", 1, true) ~= nil,
+    "protected build refuses export without throwing")
+_G.GetBuildInfo = originalBuildInfo
+secretValues[protectedBuild] = nil
+
+local originalMap = _G.C_Map.GetBestMapForUnit
+local protectedMap = {}
+secretValues[protectedMap] = true
+_G.C_Map.GetBestMapForUnit = function() return protectedMap end
+local mapOk, mapExport, mapError = pcall(MclarionWow_BuildExport)
+expectTrue(mapOk and mapExport == nil and
+    type(mapError) == "string" and mapError:find("protected", 1, true) ~= nil,
+    "protected map refuses export without throwing")
+_G.C_Map.GetBestMapForUnit = originalMap
+secretValues[protectedMap] = nil
+
 _G.UnitLevel = function() return 0 end
 export, err = MclarionWow_BuildExport()
 expectEqual(export, nil, "non-positive level blocks export")
@@ -185,6 +211,7 @@ if type(saved) == "table" and type(saved.characters) == "table" and
     expectEqual(#snapshots, 1, "repeating an unchanged snapshot does not grow local storage")
     for _ = 1, 22 do
         now = now + 1
+        gear[1] = gear[1] + 1
         SlashCmdList.MCLARIONWOW()
     end
     expectEqual(#snapshots, 20, "each character retains at most twenty snapshots")
@@ -203,6 +230,36 @@ if type(saved) == "table" and type(saved.characters) == "table" and
     SlashCmdList.MCLARIONWOW()
     expectTrue(MclarionWowData == unsupported, "unknown storage schema is not overwritten")
     MclarionWowData = saved
+end
+
+-- Automatic capture remains local to WoW; it never transfers data to the site.
+MclarionWowData = { schema = 1, characters = {} }
+chunk("MclarionWow", {})
+local captureFrame
+for _, frame in ipairs(frames) do
+    if frame.events and frame.events.PLAYER_ENTERING_WORLD then captureFrame = frame end
+end
+expectTrue(captureFrame ~= nil, "registers an automatic capture frame")
+if captureFrame then
+    now = now + 1
+    captureFrame.scripts.OnEvent(captureFrame, "PLAYER_ENTERING_WORLD")
+    local snapshots = MclarionWowData.characters["Player-1234-ABCDEF12"]
+    expectEqual(snapshots and #snapshots, 1, "entering the world stores a local snapshot")
+    now = now + 300
+    captureFrame.scripts.OnUpdate(captureFrame, 300)
+    expectEqual(#snapshots, 1, "unchanged periodic capture does not fill history")
+    gear[1] = 9001
+    captureFrame.scripts.OnEvent(captureFrame, "PLAYER_EQUIPMENT_CHANGED")
+    expectEqual(#snapshots, 2, "equipment change stores a new snapshot")
+    expectTrue(snapshots[2]:find("|9001,", 1, true) ~= nil,
+        "new snapshot carries changed equipment")
+    inCombat = true
+    gear[1] = 9002
+    captureFrame.scripts.OnUpdate(captureFrame, 300)
+    expectEqual(#snapshots, 2, "periodic capture skips combat")
+    inCombat = false
+    captureFrame.scripts.OnEvent(captureFrame, "PLAYER_REGEN_ENABLED")
+    expectEqual(#snapshots, 3, "after combat, pending equipment can be captured")
 end
 
 if failures > 0 then

@@ -36,9 +36,16 @@ function MclarionWow_BuildExport()
     local realmName = GetRealmName()
     local _, classFile = UnitClass("player")
     local level = UnitLevel("player")
-    local mapId = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player") or nil
+    local mapId
+    if C_Map and C_Map.GetBestMapForUnit then
+        mapId = C_Map.GetBestMapForUnit("player")
+    end
     local zoneText = GetZoneText()
     local _, buildString = GetBuildInfo()
+    local _, buildSecretError = rejectSecret("build", buildString)
+    if buildSecretError then
+        return nil, buildSecretError
+    end
     local build = tonumber(buildString)
 
     local values = {
@@ -140,7 +147,11 @@ local function saveSnapshot(guid, export)
         snapshots = {}
         MclarionWowData.characters[guid] = snapshots
     end
-    if snapshots[#snapshots] ~= export then
+    -- Time alone is not a meaningful character change. Keep local history bounded
+    -- even when the periodic capture runs for hours without gear/zone changes.
+    local details = export:match("^MHWOW1|forever|%d+|(.*)$")
+    local previous = snapshots[#snapshots] and snapshots[#snapshots]:match("^MHWOW1|forever|%d+|(.*)$")
+    if snapshots[#snapshots] ~= export and (details == nil or details ~= previous) then
         snapshots[#snapshots + 1] = export
         if #snapshots > 20 then
             table.remove(snapshots, 1)
@@ -206,3 +217,30 @@ end
 
 SLASH_MCLARIONWOW1 = "/mhwow"
 SlashCmdList.MCLARIONWOW = showExport
+
+local captureFrame = CreateFrame("Frame")
+local inWorld = false
+local elapsed = 0
+local function captureLocally()
+    if not inWorld or InCombatLockdown() then return end
+    local ok, export, _, guid = pcall(MclarionWow_BuildExport)
+    if ok and export and guid then
+        saveSnapshot(guid, export)
+    end
+end
+
+for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "PLAYER_EQUIPMENT_CHANGED",
+    "ZONE_CHANGED_NEW_AREA", "PLAYER_REGEN_ENABLED" }) do
+    captureFrame:RegisterEvent(event)
+end
+captureFrame:SetScript("OnEvent", function(_, event)
+    if event == "PLAYER_ENTERING_WORLD" then inWorld = true end
+    captureLocally()
+end)
+captureFrame:SetScript("OnUpdate", function(_, delta)
+    elapsed = elapsed + delta
+    if elapsed >= 300 then
+        elapsed = 0
+        captureLocally()
+    end
+end)

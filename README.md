@@ -1,6 +1,6 @@
 # MclarionWow
 
-MclarionWow is a Forever-only, read-only character snapshot addon. On explicit `/mhwow`, it saves a snapshot in account-wide `MclarionWowData` SavedVariables and shows the same export in a selectable box. It does not copy automatically, send data, inspect other players, or perform gameplay actions.
+MclarionWow is a Forever-only, read-only character snapshot addon. Out of combat, it collects local snapshots when entering the world, when equipment or zone changes, after combat, and every five minutes. It deduplicates unchanged character data and keeps at most 20 snapshots per character in account-wide `MclarionWowData` SavedVariables. `/mhwow` still shows a fresh, selectable export for manual copy. The addon does not read bags or loot yet. It never automatically copies or sends data, inspects other players, or performs gameplay actions.
 
 ## Use
 
@@ -13,7 +13,7 @@ MclarionWow is a Forever-only, read-only character snapshot addon. On explicit `
 
 No export is produced during combat. The addon also refuses to export if the client marks any snapshot value—including an inventory item ID—as secret.
 
-For each character, local history retains at most 20 distinct consecutive snapshots, dropping the oldest when full. Repeated copies of an unchanged export do not add another entry. No capture happens in the background: `/mhwow` explicitly collects and stores the current character. Do not edit or remove the SavedVariables file while WoW is running; in-client persistence on the Forever beta build still needs testing.
+For each character, local history retains at most 20 distinct consecutive character states, dropping the oldest when full. A new timestamp alone does not create a history entry. Automatic capture is local only and skips combat and secret values. The site still needs a player-reviewed manual import; refreshing the page does not read game files. WoW flushes SavedVariables on its own save/reload/logout lifecycle, not at each timer tick. Do not edit or remove the SavedVariables file while WoW is running; restoration after a full client relaunch still needs testing.
 
 ## Export format
 
@@ -34,7 +34,7 @@ The test uses mocked WoW APIs but executes the actual addon Lua file:
 lua5.4 tests/test_mclarion_wow.lua MclarionWow.lua
 ```
 
-It covers the export contract, validation, combat and secret-value refusal, manual UI, deduplication, and the bounded local history.
+It covers the export contract, validation, combat and secret-value refusal, manual UI, automatic local capture, deduplication, and bounded history.
 
 ## Manual client test checklist
 
@@ -51,7 +51,7 @@ Use only a compatible Forever client whose interface number is `16001`:
 
 ## Safety and policy caveats
 
-- This addon only reads the logged-in player's own public UI data on explicit `/mhwow` use.
+- This addon reads only the logged-in player's non-secret UI data, out of combat, on supported local events, a five-minute interval, and `/mhwow`.
 - It has no events that capture other players, no protected actions, no combat automation, no clipboard API, no arbitrary filesystem access, and no outbound traffic. WoW manages the account-wide SavedVariables file.
 - Copying and transmitting the export is a manual user action. Review the destination's privacy and data-handling terms before sharing it.
 - A matching TOC interface number does not replace an in-client compatibility test. Blizzard can change API behavior or secret-value restrictions; if the client refuses a value, the addon fails closed rather than attempting a workaround.
