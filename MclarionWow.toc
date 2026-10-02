@@ -1,0 +1,9 @@
+## Interface: 16001
+## AllowLoadGameType: camelot
+## Title: MclarionWow
+## Notes: Local Forever character snapshots and manual copy/paste export.
+## Author: Mclarion
+## Version: 0.2.0
+## SavedVariables: MclarionWowData
+
+MclarionWow.lua
