@@ -265,6 +265,23 @@ local function scanCharacterBank(collectTotals)
     if not nonnegativeInteger(characterType) or characterType > 10 then
         return nil, "Character bank type is unavailable."
     end
+    local frame = BankFrame
+    local frameType = type(frame)
+    if isSecret(frame) or (frameType ~= "table" and frameType ~= "userdata") or
+        (frameType == "table" and issecrettable(frame)) then
+        return nil, "Character bank view is unavailable or protected by the client."
+    end
+    local isShown, getActiveType = frame.IsShown, frame.GetActiveBankType
+    if isSecret(isShown) or isSecret(getActiveType) or
+        type(isShown) ~= "function" or type(getActiveType) ~= "function" then
+        return nil, "Character bank view is unavailable or protected by the client."
+    end
+    local shownOk, shown = pcall(isShown, frame)
+    local typeOk, activeType = pcall(getActiveType, frame)
+    if not shownOk or isSecret(shown) or shown ~= true or
+        not typeOk or isSecret(activeType) or activeType ~= characterType then
+        return nil, "Character bank view is not active."
+    end
 
     local anyViewable, canView, fetchTabs = C_Bank.AreAnyBankTypesViewable,
         C_Bank.CanViewBank, C_Bank.FetchPurchasedBankTabData
@@ -632,6 +649,32 @@ local function storageRoot()
     return data, nil, characters
 end
 
+local function settingsRoot()
+    local data, err = storageRoot()
+    if not data then return nil, err end
+    local settings = data.settings
+    if isSecret(settings) or (type(settings) == "table" and issecrettable(settings)) then
+        return nil, "Addon settings are protected by the client."
+    end
+    if settings == nil then
+        settings = { autoCombatLog = false, autoCharacterCapture = false,
+            autoBagCapture = false, autoBankCapture = false }
+        data.settings = settings
+    end
+    if type(settings) ~= "table" or isSecret(settings.autoCombatLog) or
+        isSecret(settings.autoCharacterCapture) or isSecret(settings.autoBagCapture) or
+        isSecret(settings.autoBankCapture) or
+        type(settings.autoCombatLog) ~= "boolean" or
+        type(settings.autoBagCapture) ~= "boolean" or
+        (settings.autoCharacterCapture ~= nil and type(settings.autoCharacterCapture) ~= "boolean") or
+        (settings.autoBankCapture ~= nil and type(settings.autoBankCapture) ~= "boolean") then
+        return nil, "Addon settings have an unsupported format; they were not overwritten."
+    end
+    if settings.autoCharacterCapture == nil then settings.autoCharacterCapture = false end
+    if settings.autoBankCapture == nil then settings.autoBankCapture = false end
+    return settings
+end
+
 local function validateHistory(snapshots, label)
     local count = #snapshots
     if count > 20 then
@@ -724,9 +767,189 @@ local function saveBagSnapshot(guid, export)
     return true
 end
 
+local function saveBankSnapshot(guid, export)
+    local data, storageError = storageRoot()
+    if not data then return nil, storageError end
+    local bankMap = data.bank
+    if isSecret(bankMap) or (type(bankMap) == "table" and issecrettable(bankMap)) then
+        return nil, "Saved bank data is protected by the client; it was not overwritten."
+    end
+    if bankMap == nil then
+        bankMap = {}
+        data.bank = bankMap
+    end
+    if type(bankMap) ~= "table" then
+        return nil, "Saved bank data has an unsupported format; it was not overwritten."
+    end
+    local snapshots = bankMap[guid]
+    if isSecret(snapshots) or (type(snapshots) == "table" and issecrettable(snapshots)) then
+        return nil, "Saved bank history is protected by the client; it was not overwritten."
+    end
+    if snapshots == nil then
+        snapshots = {}
+        bankMap[guid] = snapshots
+    elseif type(snapshots) ~= "table" then
+        return nil, "Saved bank history has an unsupported format; it was not overwritten."
+    end
+    local count, historyError = validateHistory(snapshots, "bank")
+    if historyError then return nil, historyError end
+    local details = export:match("^MHWOWK1|forever|%d+|(.*)$")
+    if not details then return nil, "Saved bank export has an unsupported format." end
+    local last = snapshots[count]
+    local previous = last and last:match("^MHWOWK1|forever|%d+|(.*)$")
+    if details ~= previous then
+        snapshots[#snapshots + 1] = export
+        if #snapshots > 20 then table.remove(snapshots, 1) end
+    end
+    return true
+end
+
 local window
 local exportBox, windowTitle, windowInstructions
 local displayedExport
+local settingsWindow, combatStatusLabel, bagStatusLabel, bankStatusLabel, exportStatusLabel
+local combatMessage = "Waiting for the next login."
+local bagMessage = "No bag capture this session."
+local bankMessage = "No own-bank capture this session."
+local exportMessage = "No copy window opened this session."
+
+local function refreshSettingsStatus()
+    if combatStatusLabel then combatStatusLabel:SetText("Combat log: " .. combatMessage) end
+    if bagStatusLabel then bagStatusLabel:SetText("Bags: " .. bagMessage) end
+    if bankStatusLabel then bankStatusLabel:SetText("Bank: " .. bankMessage) end
+    if exportStatusLabel then exportStatusLabel:SetText("Export: " .. exportMessage) end
+end
+
+local function recordExport(label, saved)
+    exportMessage = label .. (saved and
+        " snapshot stored in memory; WoW saves it later. No separate TXT file." or
+        " copy window opened; no separate TXT file was written.")
+    refreshSettingsStatus()
+end
+
+local function reportLoggingAfterOptOut()
+    if isSecret(LoggingCombat) or type(LoggingCombat) ~= "function" then
+        combatMessage = "Auto-start off; current logging status unavailable."
+    else
+        local checked, active = pcall(LoggingCombat)
+        if checked and not isSecret(active) and type(active) == "boolean" then
+            combatMessage = active and "Auto-start off; log still on. Use Stop logging now." or
+                "Off; auto-start disabled."
+        else
+            combatMessage = "Auto-start off; current logging status unavailable."
+        end
+    end
+    refreshSettingsStatus()
+end
+
+local function stopLoggingNow()
+    if isSecret(LoggingCombat) or type(LoggingCombat) ~= "function" then
+        combatMessage = "Stop unavailable: client protects the logging API."
+    else
+        local checked, active = pcall(LoggingCombat)
+        if not checked or isSecret(active) or type(active) ~= "boolean" then
+            combatMessage = "Stop unavailable: logging status is protected."
+        elseif not active then
+            combatMessage = "Off; auto-start disabled."
+        else
+            local stopped = pcall(LoggingCombat, false)
+            local verified, stillActive = pcall(LoggingCombat)
+            combatMessage = stopped and verified and not isSecret(stillActive) and stillActive == false and
+                "Off; auto-start disabled." or "Stop unavailable: client refused; log may still be on."
+        end
+    end
+    refreshSettingsStatus()
+end
+
+local function createSettingsWindow()
+    settingsWindow = CreateFrame("Frame", "MclarionWowSettingsFrame", UIParent, "BasicFrameTemplateWithInset")
+    settingsWindow:SetSize(490, 430)
+    settingsWindow:SetPoint("CENTER")
+    settingsWindow:SetFrameStrata("DIALOG")
+    settingsWindow:SetMovable(true)
+    settingsWindow:EnableMouse(true)
+    settingsWindow:RegisterForDrag("LeftButton")
+    settingsWindow:SetScript("OnDragStart", settingsWindow.StartMoving)
+    settingsWindow:SetScript("OnDragStop", settingsWindow.StopMovingOrSizing)
+
+    local title = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 18, -10)
+    title:SetText("Vaultkeeper companion")
+    local note = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    note:SetPoint("TOPLEFT", 18, -42)
+    note:SetText("Snapshots remain in memory until WoW saves them on logout or /reload.")
+
+    local function checkbox(label, y, key)
+        local button = CreateFrame("CheckButton", nil, settingsWindow, "UICheckButtonTemplate")
+        button:SetPoint("TOPLEFT", 18, y)
+        local text = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        text:SetPoint("LEFT", button, "RIGHT", 4, 0)
+        text:SetText(label)
+        local settings = settingsRoot()
+        button:SetChecked(settings and settings[key] or false)
+        button:SetScript("OnClick", function(self)
+            local current = settingsRoot()
+            if not current then self:SetChecked(false); return end
+            current[key] = self:GetChecked() == true
+            if key == "autoCombatLog" then
+                if current[key] then
+                    combatMessage = "Will auto-start on next world entry."
+                    refreshSettingsStatus()
+                else
+                    reportLoggingAfterOptOut()
+                end
+            end
+        end)
+        return button
+    end
+    local combatCheckbox = checkbox("Enable WoW combat logging at login", -67, "autoCombatLog")
+    checkbox("Capture own character state, out of combat", -98, "autoCharacterCapture")
+    checkbox("Capture own bag changes, out of combat", -129, "autoBagCapture")
+    checkbox("Capture own bank while open, out of combat", -160, "autoBankCapture")
+
+    combatStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    combatStatusLabel:SetPoint("TOPLEFT", 18, -200)
+    bagStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    bagStatusLabel:SetPoint("TOPLEFT", 18, -222)
+    bankStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    bankStatusLabel:SetPoint("TOPLEFT", 18, -244)
+    exportStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    exportStatusLabel:SetPoint("TOPLEFT", 18, -266)
+    refreshSettingsStatus()
+
+    local function exportButton(label, x, callback)
+        local button = CreateFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
+        button:SetSize(140, 25)
+        button:SetPoint("TOPLEFT", x, -297)
+        button:SetText(label)
+        button:SetScript("OnClick", callback)
+    end
+    exportButton("Character", 18, function() SlashCmdList.MCLARIONWOW() end)
+    exportButton("Bags", 170, function() SlashCmdList.MCLARIONWOWBAGSEXPORT() end)
+    exportButton("Bank (manual)", 322, function() SlashCmdList.MCLARIONWOWBANKSEXPORT() end)
+    local stopButton = CreateFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
+    stopButton:SetSize(175, 25)
+    stopButton:SetPoint("TOPLEFT", 18, -329)
+    stopButton:SetText("Stop logging now")
+    stopButton:SetScript("OnClick", function()
+        local current = settingsRoot()
+        if not current then
+            combatMessage = "Stop unavailable: addon settings were refused."
+            refreshSettingsStatus()
+            return
+        end
+        current.autoCombatLog = false
+        combatCheckbox:SetChecked(false)
+        stopLoggingNow()
+    end)
+    local footer = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    footer:SetPoint("TOPLEFT", 18, -367)
+    footer:SetText("Stop logging now may end logging started outside this addon.")
+    local saveNote = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    saveNote:SetPoint("TOPLEFT", 18, -389)
+    saveNote:SetText("Bank names need manual export. WoW controls disk writes.")
+    settingsWindow:Hide()
+end
 
 local function setExportText(text)
     displayedExport = text
@@ -789,6 +1012,7 @@ local function showExport()
     local ok, export, err, guid = pcall(MclarionWow_BuildExport)
     if ok and export then
         local savedOk, stored, storageError = pcall(saveSnapshot, guid, export)
+        if savedOk and stored then recordExport("Character", true) end
         setExportText(savedOk and stored and export or "Storage unavailable: " ..
             (savedOk and (storageError or "unknown error") or "client refused to save."))
     else
@@ -804,12 +1028,20 @@ end
 SLASH_MCLARIONWOW1 = "/mhwow"
 SlashCmdList.MCLARIONWOW = showExport
 
+SLASH_MCLARIONWOWUI1 = "/mhwowui"
+SlashCmdList.MCLARIONWOWUI = function()
+    if not settingsWindow then createSettingsWindow() end
+    refreshSettingsStatus()
+    settingsWindow:Show()
+end
+
 local function showBagExport()
     setWindowMode(false)
     local ok, export, err, guid = pcall(MclarionWow_BuildBagExport)
     if ok and export then
         local savedOk, stored, storageError = pcall(saveBagSnapshot, guid, export)
         if savedOk and stored then
+            recordExport("Bags", true)
             setExportText(export)
         else
             setExportText("Storage unavailable: " ..
@@ -832,6 +1064,7 @@ SLASH_MCLARIONWOWITEMSEXPORT1 = "/mhwowitemsexport"
 SlashCmdList.MCLARIONWOWITEMSEXPORT = function()
     setWindowMode(false)
     local ok, export, err = pcall(MclarionWow_BuildItemExport)
+    if ok and export then recordExport("Bag and gear details") end
     setExportText(ok and (export or "Item export unavailable: " .. (err or "unknown error")) or
         "Item export unavailable: client refused the scan.")
     window:Show()
@@ -861,6 +1094,7 @@ end
 SLASH_MCLARIONWOWBANKSEXPORT1 = "/mhwowbanksexport"
 SlashCmdList.MCLARIONWOWBANKSEXPORT = function()
     local ok, export, err = pcall(MclarionWow_BuildBankExport)
+    if ok and export then recordExport("Bank (manual)") end
     if not window then createWindow() end
     windowTitle:SetText("MclarionWow — Bank item export (manual only)")
     windowInstructions:SetText(
@@ -899,6 +1133,7 @@ SlashCmdList.MCLARIONWOWBANKITEMSEXPORT = function(message)
     else
         local ok, export, err, _, selectedPage, pageCount = pcall(MclarionWow_BuildBankItemExport, page)
         if ok and export then
+            recordExport("Bank details (manual)")
             windowTitle:SetText(string.format(
                 "MclarionWow — Bank item metadata (manual only, page %d/%d)", selectedPage, pageCount))
             setExportText(export)
@@ -916,8 +1151,38 @@ end
 local captureFrame = CreateFrame("Frame")
 local inWorld = false
 local elapsed = 0
+local function enableCombatLogging()
+    local settings, err = settingsRoot()
+    if not settings then
+        combatMessage = "Unavailable (" .. (err or "settings error") .. ")"
+    elseif not settings.autoCombatLog then
+        combatMessage = "Automatic start disabled in settings."
+    elseif isSecret(LoggingCombat) then
+        combatMessage = "Unavailable: client protects the logging API."
+    elseif type(LoggingCombat) ~= "function" then
+        combatMessage = "Unavailable: client does not expose combat logging."
+    else
+        local ok, active = pcall(LoggingCombat)
+        if not ok or isSecret(active) or type(active) ~= "boolean" then
+            combatMessage = "Unavailable: client refused logging status."
+        elseif active then
+            combatMessage = "On; WoW owns the combat-log file."
+        else
+            local started = pcall(LoggingCombat, true)
+            local checked, enabled = pcall(LoggingCombat)
+            if started and checked and not isSecret(enabled) and enabled == true then
+                combatMessage = "On; WoW owns the combat-log file."
+            else
+                combatMessage = "Unavailable: client refused to enable logging."
+            end
+        end
+    end
+    refreshSettingsStatus()
+end
 local function captureLocally()
     if not inWorld then return end
+    local settings = settingsRoot()
+    if not settings or not settings.autoCharacterCapture then return end
     local combat = combatStatus()
     if combat == nil or combat then return end
     local ok, export, _, guid = pcall(MclarionWow_BuildExport)
@@ -928,23 +1193,86 @@ end
 
 local function captureBagsLocally()
     if not inWorld then return end
+    local settings = settingsRoot()
+    if not settings then
+        bagMessage = "Capture unavailable: addon settings were refused."
+        refreshSettingsStatus()
+        return
+    end
+    if not settings.autoBagCapture then return end
     local combat = combatStatus()
     if combat == nil or combat then return end
     local ok, export, _, guid = pcall(MclarionWow_BuildBagExport)
-    if ok and export and guid then pcall(saveBagSnapshot, guid, export) end
+    if ok and export and guid then
+        local saved, stored = pcall(saveBagSnapshot, guid, export)
+        if saved and stored then
+            bagMessage = "Captured in memory; disk update waits for logout or /reload."
+        else
+            bagMessage = "Capture unavailable: local bag storage was refused."
+        end
+    else
+        bagMessage = "Capture unavailable: client refused the bag scan."
+    end
+    refreshSettingsStatus()
+end
+
+local function captureBankLocally()
+    if not inWorld then return end
+    local settings = settingsRoot()
+    if not settings then
+        bankMessage = "Capture unavailable: addon settings were refused."
+        refreshSettingsStatus()
+        return
+    end
+    if not settings.autoBankCapture then return end
+    local combat = combatStatus()
+    if combat == nil or combat then return end
+    -- The shared scanner rejects hidden/account-bank views and protected APIs
+    -- before any slot is read, for automatic and manual paths alike.
+    local ok, export, _, guid = pcall(MclarionWow_BuildBankExport)
+    if ok and export and guid then
+        local saved, stored = pcall(saveBankSnapshot, guid, export)
+        if saved and stored then
+            bankMessage = "Captured in memory; disk update waits for logout or /reload."
+        else
+            bankMessage = "Capture unavailable: local bank storage was refused."
+        end
+    else
+        bankMessage = "Capture unavailable: client refused the bank scan."
+    end
+    refreshSettingsStatus()
 end
 
 for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "PLAYER_EQUIPMENT_CHANGED",
-    "ZONE_CHANGED_NEW_AREA", "PLAYER_REGEN_ENABLED", "BAG_UPDATE_DELAYED" }) do
+    "ZONE_CHANGED_NEW_AREA", "PLAYER_REGEN_ENABLED", "BAG_UPDATE_DELAYED", "BAG_OPEN",
+    "BANKFRAME_OPENED", "PLAYERBANKSLOTS_CHANGED", "BANK_TABS_CHANGED" }) do
     captureFrame:RegisterEvent(event)
 end
-local function onEvent(_, event)
-    if event == "PLAYER_ENTERING_WORLD" then inWorld = true end
-    if event ~= "BAG_UPDATE_DELAYED" then pcall(captureLocally) end
+local function onEvent(_, event, bagID)
+    if event == "PLAYER_ENTERING_WORLD" then
+        inWorld = true
+        enableCombatLogging()
+    end
+    if event ~= "BAG_UPDATE_DELAYED" and event ~= "BAG_OPEN" and
+        event ~= "BANKFRAME_OPENED" and event ~= "PLAYERBANKSLOTS_CHANGED" and
+        event ~= "BANK_TABS_CHANGED" then pcall(captureLocally) end
     if event == "PLAYER_ENTERING_WORLD" or event == "BAG_UPDATE_DELAYED" or
-        event == "PLAYER_REGEN_ENABLED" then pcall(captureBagsLocally) end
+        event == "PLAYER_REGEN_ENABLED" or (event == "BAG_OPEN" and
+        not isSecret(bagID) and type(bagID) == "number" and
+        bagID == math.floor(bagID) and bagID >= 0 and bagID <= 4) then
+        pcall(captureBagsLocally)
+    end
+    if event == "BANKFRAME_OPENED" or event == "PLAYERBANKSLOTS_CHANGED" or
+        event == "BANK_TABS_CHANGED" then pcall(captureBankLocally) end
 end
 captureFrame:SetScript("OnEvent", function(...) pcall(onEvent, ...) end)
+if not isSecret(EventRegistry) and type(EventRegistry) == "table" and
+    not issecrettable(EventRegistry) and
+    not isSecret(EventRegistry.RegisterCallback) and
+    type(EventRegistry.RegisterCallback) == "function" then
+    pcall(EventRegistry.RegisterCallback, EventRegistry,
+        "BankPanelMixin.PageSelected", function() pcall(captureBankLocally) end, captureFrame)
+end
 local function onUpdate(_, delta)
     elapsed = elapsed + delta
     if elapsed >= 300 then
