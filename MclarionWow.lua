@@ -172,6 +172,35 @@ function MclarionWow_BuildExport()
     return export, nil, playerGuid
 end
 
+-- Additive character identity format; MHWOW1 remains available for older importers.
+function MclarionWow_BuildIdentityExport()
+    local export, err, guid = MclarionWow_BuildExport()
+    if not export then return nil, err end
+    local available, apiError = exportApisAvailable(UnitFactionGroup, UnitRace, UnitSex)
+    if not available then return nil, apiError end
+    local faction = UnitFactionGroup("player")
+    local _, race = UnitRace("player")
+    local sex = UnitSex("player")
+    if isSecret(faction) or isSecret(race) or isSecret(sex) then
+        return nil, "Player identity is protected by the client."
+    end
+    if faction ~= "Alliance" and faction ~= "Horde" and faction ~= "Neutral" then
+        return nil, "Player faction is unavailable."
+    end
+    if type(race) ~= "string" or #race < 2 or #race > 32 or
+        not race:match("^[A-Za-z]+$") then
+        return nil, "Player race is unavailable."
+    end
+    if sex ~= 1 and sex ~= 2 and sex ~= 3 then
+        return nil, "Player gender is unavailable."
+    end
+    local gender = sex == 2 and "Male" or (sex == 3 and "Female" or "Unknown")
+    local result = export:gsub("^MHWOW1|", "MHWOW2|", 1) .. "|" ..
+        faction .. "|" .. race .. "|" .. gender
+    if #result > 4096 then return nil, "Character export is too large." end
+    return result, nil, guid
+end
+
 -- Shared, fail-closed scanner for the diagnostic and manual bag export.
 local function scanBags(collectTotals)
     local combat, combatError = combatStatus()
@@ -716,9 +745,9 @@ local function saveSnapshot(guid, export)
     if historyError then return nil, historyError end
     -- Time alone is not a meaningful character change. Keep local history bounded
     -- even when the periodic capture runs for hours without gear/zone changes.
-    local details = export:match("^MHWOW1|forever|%d+|(.*)$")
+    local details = export:match("^MHWOW[12]|forever|%d+|(.*)$")
     local last = snapshots[count]
-    local previous = last and last:match("^MHWOW1|forever|%d+|(.*)$")
+    local previous = last and last:match("^MHWOW[12]|forever|%d+|(.*)$")
     if last ~= export and (details == nil or details ~= previous) then
         snapshots[#snapshots + 1] = export
         if #snapshots > 20 then
@@ -1028,6 +1057,25 @@ end
 SLASH_MCLARIONWOW1 = "/mhwow"
 SlashCmdList.MCLARIONWOW = showExport
 
+SLASH_MCLARIONWOWIDENTITY1 = "/mhwowidentity"
+SlashCmdList.MCLARIONWOWIDENTITY = function()
+    setWindowMode(false)
+    local ok, export, err, guid = pcall(MclarionWow_BuildIdentityExport)
+    if ok and export then
+        local savedOk, stored, storageError = pcall(saveSnapshot, guid, export)
+        if savedOk and stored then recordExport("Character identity", true) end
+        setExportText(savedOk and stored and export or "Storage unavailable: " ..
+            (savedOk and (storageError or "unknown error") or "client refused to save."))
+    else
+        setExportText("Identity export unavailable: " ..
+            (ok and (err or "unknown error") or "client refused the scan."))
+    end
+    window:Show()
+    exportBox:Show()
+    exportBox:SetFocus()
+    exportBox:HighlightText()
+end
+
 SLASH_MCLARIONWOWUI1 = "/mhwowui"
 SlashCmdList.MCLARIONWOWUI = function()
     if not settingsWindow then createSettingsWindow() end
@@ -1185,7 +1233,11 @@ local function captureLocally()
     if not settings or not settings.autoCharacterCapture then return end
     local combat = combatStatus()
     if combat == nil or combat then return end
-    local ok, export, _, guid = pcall(MclarionWow_BuildExport)
+    local ok, export, _, guid = pcall(MclarionWow_BuildIdentityExport)
+    if not ok or not export then
+        -- Unavailable identity APIs must not suppress the existing gear capture.
+        ok, export, _, guid = pcall(MclarionWow_BuildExport)
+    end
     if ok and export and guid then
         pcall(saveSnapshot, guid, export)
     end

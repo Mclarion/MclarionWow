@@ -55,6 +55,9 @@ _G.UnitName = function(unit) assert(unit == "player"); return "Name|Percent%" en
 _G.GetRealmName = function() return "Realm|One%" end
 _G.UnitClass = function(unit) assert(unit == "player"); return "Warrior", "WARRIOR", 1 end
 _G.UnitLevel = function(unit) assert(unit == "player"); return 80 end
+_G.UnitFactionGroup = function(unit) assert(unit == "player"); return "Alliance" end
+_G.UnitRace = function(unit) assert(unit == "player"); return "Dwarf", "Dwarf" end
+_G.UnitSex = function(unit) assert(unit == "player"); return 2 end
 _G.C_Map = { GetBestMapForUnit = function(unit) assert(unit == "player"); return 2339 end }
 _G.GetZoneText = function() return "Dornogal|Core" end
 _G.GetInventoryItemID = function(unit, slot) assert(unit == "player"); return gear[slot] end
@@ -762,6 +765,53 @@ local export, err = MclarionWow_BuildExport()
 expectEqual(err, nil, "valid snapshot has no error")
 expectEqual(export, expected, "builds exactly twelve escaped pipe-separated fields")
 expectEqual(select(2, export:gsub("|", "")), 11, "export has exactly twelve fields")
+local identity, identityError, identityGuid = MclarionWow_BuildIdentityExport()
+expectEqual(identityError, nil, "own-character identity APIs permit a valid export")
+expectEqual(identity, expected:gsub("^MHWOW1|", "MHWOW2|", 1) .. "|Alliance|Dwarf|Male",
+    "identity export appends a versioned faction, race and gender")
+expectEqual(identityGuid, "Player-1234-ABCDEF12", "identity export retains own player GUID")
+for _, apiName in ipairs({ "UnitFactionGroup", "UnitRace", "UnitSex" }) do
+    local original = _G[apiName]
+    secretValues[original] = true
+    local safe, blocked, reason = pcall(MclarionWow_BuildIdentityExport)
+    expectTrue(safe and blocked == nil and type(reason) == "string" and
+        reason:find("protected", 1, true) ~= nil,
+        "identity export refuses protected " .. apiName .. " before invocation")
+    secretValues[original] = nil
+end
+local originalFaction, originalRace, originalSex = UnitFactionGroup, UnitRace, UnitSex
+local protectedIdentity = protectedSentinel()
+secretValues[protectedIdentity] = true
+_G.UnitFactionGroup = function() return protectedIdentity end
+local safe, blocked, reason = pcall(MclarionWow_BuildIdentityExport)
+expectTrue(safe and blocked == nil and reason:find("protected", 1, true) ~= nil,
+    "protected faction value is never converted")
+_G.UnitFactionGroup = originalFaction
+_G.UnitRace = function() return "Dwarf", protectedIdentity end
+safe, blocked, reason = pcall(MclarionWow_BuildIdentityExport)
+expectTrue(safe and blocked == nil and reason:find("protected", 1, true) ~= nil,
+    "protected race value is never converted")
+_G.UnitRace = originalRace
+_G.UnitSex = function() return protectedIdentity end
+safe, blocked, reason = pcall(MclarionWow_BuildIdentityExport)
+expectTrue(safe and blocked == nil and reason:find("protected", 1, true) ~= nil,
+    "protected gender value is never compared")
+secretValues[protectedIdentity] = nil
+_G.UnitSex = function() return 3 end
+expectTrue(MclarionWow_BuildIdentityExport():find("|Alliance|Dwarf|Female$") ~= nil,
+    "female identity is preserved as a fixed enum")
+_G.UnitSex = function() return 1 end
+expectTrue(MclarionWow_BuildIdentityExport():find("|Alliance|Dwarf|Unknown$") ~= nil,
+    "unspecified gender is represented as unknown")
+_G.UnitSex = function() return 7 end
+expectEqual(MclarionWow_BuildIdentityExport(), nil, "invalid gender is refused")
+_G.UnitSex = originalSex
+_G.UnitRace = function() return "Dwarf", "Dwarf|forged" end
+expectEqual(MclarionWow_BuildIdentityExport(), nil, "race cannot inject export separators")
+_G.UnitRace = originalRace
+_G.UnitFactionGroup = function() return "Other" end
+expectEqual(MclarionWow_BuildIdentityExport(), nil, "unknown faction is refused")
+_G.UnitFactionGroup = originalFaction
 for _, apiName in ipairs({ "GetServerTime", "UnitGUID", "UnitName", "GetRealmName",
     "UnitClass", "UnitLevel", "GetZoneText", "GetBuildInfo", "GetInventoryItemID" }) do
     local original = _G[apiName]
@@ -1548,6 +1598,34 @@ if type(SlashCmdList.MCLARIONWOWUI) == "function" then
     expectEqual(MclarionWowData.settings.autoCombatLog, false,
         "explicit stop also disables automatic restart on the next world entry")
 end
+
+MclarionWowData = { schema = 1, characters = {}, settings = {
+    autoCombatLog = false, autoCharacterCapture = true,
+    autoBagCapture = false, autoBankCapture = false } }
+expectEqual(SLASH_MCLARIONWOWIDENTITY1, "/mhwowidentity", "registers manual identity command")
+SlashCmdList.MCLARIONWOWIDENTITY()
+local identityHistory = MclarionWowData.characters["Player-1234-ABCDEF12"]
+expectTrue(type(identityHistory) == "table" and #identityHistory == 1 and
+    identityHistory[1]:find("^MHWOW2|forever|") ~= nil,
+    "manual identity export stores its reviewed MHWOW2 snapshot for WoW's disk flush")
+expectEqual(latestExportText(), identityHistory[1], "identity command selects the saved export")
+SlashCmdList.MCLARIONWOWIDENTITY()
+expectEqual(#identityHistory, 1, "unchanged manual identity snapshots deduplicate")
+local latestCapture
+for _, frame in ipairs(frames) do
+    if frame.events and frame.events.PLAYER_EQUIPMENT_CHANGED then latestCapture = frame end
+end
+local savedFaction = UnitFactionGroup
+_G.UnitFactionGroup = nil
+gear[1] = gear[1] + 1
+latestCapture.scripts.OnEvent(latestCapture, "PLAYER_EQUIPMENT_CHANGED")
+expectTrue(#identityHistory == 2 and identityHistory[2]:find("^MHWOW1|forever|") ~= nil,
+    "automatic capture falls back to gear-only format when identity APIs are absent")
+_G.UnitFactionGroup = savedFaction
+gear[1] = gear[1] + 1
+latestCapture.scripts.OnEvent(latestCapture, "PLAYER_EQUIPMENT_CHANGED")
+expectTrue(#identityHistory == 3 and identityHistory[3]:find("^MHWOW2|forever|") ~= nil,
+    "automatic opt-in capture resumes MHWOW2 when identity APIs are available")
 
 if failures > 0 then
     io.stderr:write(string.format("\n%d/%d assertions failed\n", failures, tests))

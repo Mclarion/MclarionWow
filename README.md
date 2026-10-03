@@ -2,14 +2,14 @@
 
 MclarionWow is a Forever-only, read-only addon for the logged-in character's non-secret data. `/mhwowui` opens its settings and status window. **All automatic features start off on first use**: character, own-bag and own-character-bank snapshots, and native combat logging. Enable only the ones you want. Automatic captures use validated in-game APIs, run out of combat, and never switch bank pages or read account/Warband bank tabs. Bag and bank totals are not proof of an item's acquisition source.
 
-Character snapshots run on login, equipment/zone changes, after combat, and every five minutes once opted in. Bag snapshots run on login, bag opening/changes, after combat, and every five minutes once opted in. When the character-bank view is open, its opening, item changes, and player-selected bank pages check character-bank item-ID/count totals once opted in. Manual commands work independently of these switches: `/mhwow` and `/mhwowbagsexport` also save their results to local character/bag histories when explicitly invoked; manual bank and metadata exports do not save a history. The addon does not upload data or write arbitrary TXT files; exports are copied only by the player to a destination they choose.
+Character snapshots run on login, equipment/zone changes, after combat, and every five minutes once opted in. Version 0.9.0 tries to include the logged-in player's faction, race and gender in a `MHWOW2` snapshot; when the identity APIs are unavailable, automatic capture falls back to the existing gear-only `MHWOW1` format. Bag snapshots run on login, bag opening/changes, after combat, and every five minutes once opted in. When the character-bank view is open, its opening, item changes, and player-selected bank pages check character-bank item-ID/count totals once opted in. Manual commands work independently of these switches: `/mhwow`, `/mhwowidentity` and `/mhwowbagsexport` also save their results to local histories when explicitly invoked; manual bank and metadata exports do not save a history. The addon does not upload data or write arbitrary TXT files; exports are copied only by the player to a destination they choose.
 
 ## Use
 
 1. Install the `MclarionWow` directory under the Forever client's `Interface/AddOns` directory **while the client is closed**. The TOC targets interface `16001` and game type `camelot`; installation alone does not prove in-game compatibility.
 2. Enable **MclarionWow** at character selection.
 3. Log into a character, run `/mhwowui`, and explicitly enable your desired automatic captures. The combat-log switch asks WoW's own `LoggingCombat` API to enable its game-managed log at the **next world-entry event**. Switching off **auto-start** never stops logging already running: after a `/reload` the addon cannot reliably know who started it. To end the current log, explicitly click **Stop logging now**, which also turns off auto-start and may stop logging begun by you or another addon. The window reports in-memory capture, refused APIs, and when logging remains active. It does not prove a file exists until checked on the actual client.
-4. Remain out of combat and type `/mhwow` for a manual character export.
+4. Remain out of combat and type `/mhwowidentity` for a versioned character export including your faction, race and gender. `/mhwow` remains the original 12-field export for older importers. If the client protects or lacks an identity API, the identity command refuses rather than guessing.
 5. Press **Ctrl+C** in the already-selected text box, then paste the export where you choose.
    For a separate inventory export, use `/mhwowbagsexport` out of combat. Review it before copying; the local bag snapshot is already recorded when the text appears. Paste it only into your own `/wow` bag inventory field after importing the matching character; never share exports in chat.
    `/mhwowitemsexport` is a **new, separate manual export** of metadata for item IDs currently observed in your own bags and equipment. It does not alter or automatically upload either inventory or SavedVariables. Paste it only into the separate item-metadata field on your signed-in `/wow` page after importing the matching character; never use the bag field.
@@ -23,9 +23,15 @@ For each character, character, bag and bank histories independently retain at mo
 
 ## Export format
 
-Exactly 12 pipe-separated fields:
+The original `/mhwow` format has exactly 12 pipe-separated fields:
 
 `MHWOW1|forever|serverEpoch|playerGuid|name|realm|classFile|level|mapId|zone|gearCsv|build`
+
+The new `/mhwowidentity` format has exactly 15 fields; the first 12 have identical meaning:
+
+`MHWOW2|forever|serverEpoch|playerGuid|name|realm|classFile|level|mapId|zone|gearCsv|build|faction|race|gender`
+
+The trailing fields are the logged-in player's non-secret `UnitFactionGroup` result (`Alliance`, `Horde`, or `Neutral`), the locale-independent `UnitRace` token (ASCII letters), and `UnitSex` mapped to `Male`, `Female`, or `Unknown`. Neither command reads a targeted or nearby player. The new format requires an importer that explicitly accepts `MHWOW2`; the old format remains available.
 
 - `gearCsv` contains 19 nonnegative item IDs for inventory slots 1 through 19; an empty slot is `0`.
 - Text bytes are escaped in this order: `%` → `%25`, `|` → `%7C`. Control characters are rejected.
@@ -36,7 +42,7 @@ Exactly 12 pipe-separated fields:
 
 `MHWOWB1|forever|serverEpoch|playerGuid|itemId:totalCount,...|build`
 
-This six-field export lists only sorted, numeric item IDs and aggregated stack counts for the player's backpack and equipped bags 1–4. It contains no item names, links, slot positions, chat text, or acquisition source. Empty bags have an empty fifth field. A capture fails rather than truncating if the export exceeds 16,000 bytes, if any bag has more than 120 slots, or if an item value is protected or invalid. The `/wow` page has separate character (`MHWOW1`) and bag (`MHWOWB1`) import fields; it does not read game files automatically.
+This six-field export lists only sorted, numeric item IDs and aggregated stack counts for the player's backpack and equipped bags 1–4. It contains no item names, links, slot positions, chat text, or acquisition source. Empty bags have an empty fifth field. A capture fails rather than truncating if the export exceeds 16,000 bytes, if any bag has more than 120 slots, or if an item value is protected or invalid. The `/wow` page has separate character (`MHWOW1` or, after its importer is deployed, `MHWOW2`) and bag (`MHWOWB1`) import fields; it does not read game files automatically.
 
 ## Character-bank item totals (0.8.0)
 
@@ -66,7 +72,7 @@ The test uses mocked WoW APIs but executes the actual addon Lua file:
 (cd tests && lua5.4 test_mclarion_wow.lua)
 ```
 
-It covers all four wire formats, manual exports, combat/protected-value refusal, stale-popup replacement, first-run opt-in and settings, bounded character/bag/bank histories, native logging safeguards, account-bank refusal, visible bank-page capture and in-memory/failure status. Ordinary bag/character/timer events do not call bank APIs. Mock secret sentinels trap premature field access; in-game 0.8.0 behavior and a full client-restart SavedVariables round trip remain unverified. See [TODO.md](TODO.md) for the next chat's addon-only verification handoff.
+It covers `MHWOW1`, `MHWOW2` and the three separate bag/bank/item formats, manual exports, combat/protected-value refusal, stale-popup replacement, first-run opt-in and settings, bounded character/bag/bank histories, native logging safeguards, account-bank refusal, visible bank-page capture and in-memory/failure status. Ordinary bag/character/timer events do not call bank APIs. Mock secret sentinels trap premature field access. The 0.8.0 settings window and one SavedVariables disk flush were verified in-game; the new 0.9.0 identity export, full client-restart round trip, and bank capture still require in-game checks. See [TODO.md](TODO.md).
 
 ## Manual client test checklist
 
