@@ -1,6 +1,6 @@
 # MclarionWow: how data is produced and stored
 
-**Status: 3 October 2026.** This describes the published **0.9.0** addon source, not a promise that every API has passed a live Forever-client test. The installed Lua and TOC matched the public source by SHA-256; `/mhwowidentity`, bank capture, and a full-restart SavedVariables round trip still need in-game verification. Keep this document in sync with changes to data formats, capture triggers, storage, importers, or deployment. The matching handoff copy is `B:\MclarionWow-Data-README.md` on Mclarion-Main. Do not insert actual character exports, GUIDs, account folder names, SavedVariables contents, or combat-log lines here.
+**Status: 3 October 2026.** This describes the published **0.9.0** addon source and the live behavior actually reported so far. The installed Lua and TOC matched the public source by SHA-256. The player ran `/mhwowidentity` in Forever Beta and reported a complete `MHWOW2` export with the expected `Alliance|Dwarf|Male` identity and build `70205`. That confirms the manual identity-export path on this character; it does **not** verify every identity combination, automatic capture, bank behavior, or a full-restart SavedVariables round trip. Keep this document in sync with changes to data formats, capture triggers, storage, importers, or deployment. The matching handoff copy is `B:\MclarionWow-Data-README.md` on Mclarion-Main. Do not insert actual character exports, GUIDs, names, account folder names, SavedVariables contents, or combat-log lines here.
 
 ## The three separate data paths
 
@@ -60,7 +60,7 @@ All payloads are versioned, bounded, validated, and player-reviewed. The charact
 
 The addon has **no HTTP client, automatic upload, external filesystem reader, quest/reputation/profession recorder, or combat parser**. The signed-in Vaultkeeper website and Windows client have separate import/storage code. A manual export needs a matching deployed importer; do not assume a locally tested `MHWOW2` parser is already deployed. Likewise, refreshing a website view does not ingest new game data. An external reader of SavedVariables or logs is a separate design requiring policy/privacy review; the existence of game-written files alone is not authorization.
 
-Mock Lua tests exercise the source, and one earlier SavedVariables write was observed after `/reload`/exit. **Still to verify in-game for 0.9.0:** loading without errors, `/mhwowidentity`, opted-in own-bank capture/refusal, logging controls, settings/histories after a full restart, and the manual import round trip. See `TODO.md`; do not convert a source-code feature into a live-verified claim.
+Mock Lua tests exercise the source, a real `/mhwowidentity` manual export was reported on one Alliance Dwarf, and one earlier SavedVariables write was observed after `/reload`/exit. **Still to verify in-game for 0.9.0:** `/mhwow` backward compatibility, automatic MHWOW2 capture, opted-in own-bank capture/refusal, logging controls, settings/histories after a full restart, and the manual import round trip. The successful manual export does not prove the website or Windows importer is deployed. See `TODO.md`; do not convert a source-code feature into a live-verified claim.
 
 ## Maintenance rule for future threads
 
