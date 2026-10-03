@@ -61,6 +61,12 @@ _G.GetInventoryItemID = function(unit, slot) assert(unit == "player"); return ge
 _G.GetBuildInfo = function() return "1.60.1", "70170", "Oct 1 2026", 16001 end
 _G.GetLocale = function() return "enUS" end
 _G.InCombatLockdown = function() return inCombat end
+local combatLogging = false
+local loggingCalls = 0
+_G.LoggingCombat = function(enabled)
+    if enabled ~= nil then loggingCalls = loggingCalls + 1; combatLogging = enabled end
+    return combatLogging
+end
 _G.issecretvalue = function(value) return secretValues[value] == true end
 _G.issecrettable = function(value) return secretTables[value] == true end
 _G.C_Container = {
@@ -70,6 +76,11 @@ _G.C_Container = {
     end,
 }
 _G.Enum = { BankType = { Character = 1 } }
+_G.BankFrame = {
+    shown = true, bankType = 1,
+    IsShown = function(self) return self.shown end,
+    GetActiveBankType = function(self) return self.bankType end,
+}
 _G.C_Bank = {
     AreAnyBankTypesViewable = function() return true end,
     CanViewBank = function(bankType) assert(bankType == Enum.BankType.Character); return true end,
@@ -110,6 +121,8 @@ _G.CreateFrame = function(frameType, name, parent, template)
     function frame:SetTextInsets() end
     function frame:SetText(text) self.text = text end
     function frame:GetText() return self.text end
+    function frame:SetChecked(checked) self.checked = checked end
+    function frame:GetChecked() return self.checked end
     function frame:HighlightText() self.highlighted = true end
     function frame:SetFocus() self.focused = true end
     function frame:ClearFocus() self.focused = false end
@@ -288,6 +301,33 @@ if type(MclarionWow_ProbeBank) == "function" then
     local expectedStorage = { schema = 1, characters = { ["Player-1234-ABCDEF12"] = { "existing snapshot" } } }
     local report, problem = MclarionWow_ProbeBank()
     expectEqual(problem, nil, "viewable own character bank can be counted")
+    local slotReads = 0
+    C_Container.GetContainerNumSlots = function(...)
+        slotReads = slotReads + 1
+        return oldSlots(...)
+    end
+    BankFrame.bankType = 2
+    local otherProbe, otherProblem = MclarionWow_ProbeBank()
+    local otherExport = MclarionWow_BuildBankExport()
+    local otherMetadata = MclarionWow_BuildBankItemExport()
+    expectTrue(otherProbe == nil and otherExport == nil and otherMetadata == nil and
+        type(otherProblem) == "string" and otherProblem:find("view", 1, true) ~= nil and
+        slotReads == 0, "manual bank paths cannot scan while an account-bank page is active")
+    BankFrame.bankType = Enum.BankType.Character
+    BankFrame.shown = false
+    local hiddenProbe, hiddenProblem = MclarionWow_ProbeBank()
+    expectTrue(hiddenProbe == nil and type(hiddenProblem) == "string" and
+        hiddenProblem:find("view", 1, true) ~= nil and slotReads == 0,
+        "manual bank probe cannot scan a hidden character-bank frame")
+    BankFrame.shown = true
+    local previousFrame = BankFrame
+    _G.BankFrame = 42
+    local safeFrame, invalidProbe, invalidProblem = pcall(MclarionWow_ProbeBank)
+    expectTrue(safeFrame and invalidProbe == nil and type(invalidProblem) == "string" and
+        invalidProblem:find("view", 1, true) ~= nil and slotReads == 0,
+        "malformed bank frame is refused without a Lua error or slot read")
+    _G.BankFrame = previousFrame
+    C_Container.GetContainerNumSlots = function(tab) return tab == 6 and 2 or tab == 7 and 1 or 0 end
     expectTrue(report and report:find("2 tabs", 1, true) and
         report:find("3 slots", 1, true) and report:find("2 occupied", 1, true) and
         report:find("1 distinct", 1, true) and not report:find("4242", 1, true),
@@ -1163,6 +1203,9 @@ end
 
 -- Automatic capture remains local to WoW; it never transfers data to the site.
 MclarionWowData = { schema = 1, characters = {} }
+_G.EventRegistry = { callbacks = {}, RegisterCallback = function(self, event, callback)
+    self.callbacks[event] = callback
+end }
 chunk("MclarionWow", {})
 local captureFrame
 for _, frame in ipairs(frames) do
@@ -1171,17 +1214,49 @@ end
 expectTrue(captureFrame ~= nil, "registers an automatic capture frame")
 if captureFrame then
     local automaticBankReads = 0
-    local originalAutomaticTabs = C_Bank.FetchPurchasedBankTabData
-    C_Bank.FetchPurchasedBankTabData = function(...)
-        automaticBankReads = automaticBankReads + 1
-        return originalAutomaticTabs(...)
+    local originalBankApis = {}
+    for name, api in pairs(C_Bank) do
+        if type(api) == "function" then
+            originalBankApis[name] = api
+            C_Bank[name] = function(...)
+                automaticBankReads = automaticBankReads + 1
+                return api(...)
+            end
+        end
+    end
+    local originalNumSlots, originalItemInfo =
+        C_Container.GetContainerNumSlots, C_Container.GetContainerItemInfo
+    C_Container.GetContainerNumSlots = function(bag, ...)
+        if type(bag) == "number" and bag >= 6 then automaticBankReads = automaticBankReads + 1 end
+        return originalNumSlots(bag, ...)
+    end
+    C_Container.GetContainerItemInfo = function(bag, ...)
+        if type(bag) == "number" and bag >= 6 then automaticBankReads = automaticBankReads + 1 end
+        return originalItemInfo(bag, ...)
     end
     now = now + 1
     captureFrame.scripts.OnEvent(captureFrame, "PLAYER_ENTERING_WORLD")
+    local settings = MclarionWowData.settings
+    expectTrue(settings and settings.autoCombatLog == false and
+        settings.autoCharacterCapture == false and settings.autoBagCapture == false and
+        settings.autoBankCapture == false, "first login requires consent for every automatic capture")
+    expectEqual(loggingCalls, 0, "first login does not write a combat-log file without opt-in")
+    expectTrue(not MclarionWowData.characters["Player-1234-ABCDEF12"] and
+        MclarionWowData.bags == nil, "first login does not capture identity or bags without opt-in")
+    settings.autoCombatLog = true
+    settings.autoCharacterCapture = true
+    settings.autoBagCapture = true
+    settings.autoBankCapture = true
+    captureFrame.scripts.OnEvent(captureFrame, "PLAYER_ENTERING_WORLD")
+    expectTrue(combatLogging and loggingCalls == 1,
+        "entering the world enables WoW's own combat-log file once")
+    captureFrame.scripts.OnEvent(captureFrame, "PLAYER_ENTERING_WORLD")
+    expectEqual(loggingCalls, 1, "an already-enabled combat log is not restarted")
     local snapshots = MclarionWowData.characters["Player-1234-ABCDEF12"]
     expectEqual(snapshots and #snapshots, 1, "entering the world stores a local snapshot")
     expectTrue(captureFrame.events.BAG_UPDATE_DELAYED,
         "registers the coalesced own-bag update event")
+    expectTrue(captureFrame.events.BAG_OPEN, "registers the player bag-open event")
     local bagSnapshots = MclarionWowData.bags and MclarionWowData.bags["Player-1234-ABCDEF12"]
     expectEqual(bagSnapshots and #bagSnapshots, 1, "entering the world stores a bag snapshot")
     local originalBagInfo = C_Container.GetContainerItemInfo
@@ -1204,6 +1279,21 @@ if captureFrame then
     inCombat = false
     captureFrame.scripts.OnEvent(captureFrame, "PLAYER_REGEN_ENABLED")
     expectEqual(#bagSnapshots, 3, "after combat, pending bag change can be captured")
+    C_Container.GetContainerItemInfo = function(bag, slot)
+        if bag == 0 and slot == 1 then return { itemID = 4242, stackCount = 6 } end
+    end
+    captureFrame.scripts.OnEvent(captureFrame, "BAG_OPEN", 0)
+    expectEqual(#bagSnapshots, 4, "opening own backpack checks and stores changed totals")
+    local protectedBagID = protectedSentinel()
+    secretValues[protectedBagID] = true
+    captureFrame.scripts.OnEvent(captureFrame, "BAG_OPEN", protectedBagID)
+    expectEqual(#bagSnapshots, 4, "protected bag-open argument is not inspected")
+    secretValues[protectedBagID] = nil
+    C_Container.GetContainerItemInfo = function(bag, slot)
+        if bag == 0 and slot == 1 then return { itemID = 4242, stackCount = 7 } end
+    end
+    captureFrame.scripts.OnEvent(captureFrame, "BAG_OPEN", 6)
+    expectEqual(#bagSnapshots, 4, "opening a non-player bag cannot trigger a capture")
     C_Container.GetContainerItemInfo = originalBagInfo
     now = now + 300
     captureFrame.scripts.OnUpdate(captureFrame, 300)
@@ -1230,8 +1320,233 @@ if captureFrame then
         "automatic events contain combat API failures without writing")
     _G.InCombatLockdown = originalCombat
     expectEqual(automaticBankReads, 0,
-        "automatic capture never scans or exports character-bank items")
-    C_Bank.FetchPurchasedBankTabData = originalAutomaticTabs
+        "ordinary bag, character and timer events never scan the character bank")
+    for name, api in pairs(originalBankApis) do C_Bank[name] = api end
+    C_Container.GetContainerNumSlots, C_Container.GetContainerItemInfo =
+        originalNumSlots, originalItemInfo
+end
+
+if captureFrame then
+    expectTrue(captureFrame.events.BANKFRAME_OPENED,
+        "own-bank opening is observed without automated page switching")
+    local originalSlots, originalInfo = C_Container.GetContainerNumSlots, C_Container.GetContainerItemInfo
+    local originalTabs, originalBankFrame = C_Bank.FetchPurchasedBankTabData, BankFrame
+    _G.BankFrame = {
+        IsShown = function() return true end,
+        GetActiveBankType = function() return Enum.BankType.Character end,
+    }
+    C_Bank.FetchPurchasedBankTabData = function() return { { ID = 6 }, { ID = 7 } } end
+    C_Container.GetContainerNumSlots = function(tab) return tab == 6 and 1 or 0 end
+    C_Container.GetContainerItemInfo = function(tab)
+        if tab == 6 then return { itemID = 4242, stackCount = 3 } end
+    end
+    captureFrame.scripts.OnEvent(captureFrame, "BANKFRAME_OPENED")
+    local history = MclarionWowData.bank and MclarionWowData.bank["Player-1234-ABCDEF12"]
+    expectTrue(history and #history == 1 and
+        history[1]:find("|6:4242:3|", 1, true) ~= nil,
+        "opening own bank stores bounded character-bank totals in memory")
+    if history then
+        C_Container.GetContainerItemInfo = function(tab)
+            if tab == 6 then return { itemID = 4242, stackCount = 4 } end
+        end
+        local pageSelected = EventRegistry.callbacks["BankPanelMixin.PageSelected"]
+        expectTrue(type(pageSelected) == "function", "observes player-selected bank pages")
+        if pageSelected then pageSelected() end
+        expectEqual(#history, 2, "selecting a bank page stores changed character-bank totals")
+        captureFrame.scripts.OnEvent(captureFrame, "BANKFRAME_OPENED")
+        expectEqual(#history, 2, "unchanged open-bank state is deduplicated")
+        BankFrame.GetActiveBankType = function() return 2 end
+        captureFrame.scripts.OnEvent(captureFrame, "BANKFRAME_OPENED")
+        expectEqual(#history, 2, "account-bank view never stores character-bank data")
+        BankFrame.GetActiveBankType = function() return Enum.BankType.Character end
+        inCombat = true
+        captureFrame.scripts.OnEvent(captureFrame, "BANKFRAME_OPENED")
+        expectEqual(#history, 2, "automatic bank capture refuses combat")
+        inCombat = false
+        MclarionWowData.settings.autoBankCapture = false
+        captureFrame.scripts.OnEvent(captureFrame, "BANKFRAME_OPENED")
+        expectEqual(#history, 2, "disabled automatic bank capture leaves history unchanged")
+        MclarionWowData.settings.autoBankCapture = true
+        secretValues[BankFrame] = true
+        expectTrue(pcall(captureFrame.scripts.OnEvent, captureFrame, "BANKFRAME_OPENED"),
+            "protected bank frame does not crash the addon")
+        expectEqual(#history, 2, "protected bank frame is never read")
+        secretValues[BankFrame] = nil
+        local oldEnum = Enum
+        local protectedReads = 0
+        local protectedEnum = setmetatable({}, { __index = function()
+            protectedReads = protectedReads + 1
+            error("protected Enum was inspected")
+        end })
+        secretTables[protectedEnum] = true
+        _G.Enum = protectedEnum
+        captureFrame.scripts.OnEvent(captureFrame, "BANKFRAME_OPENED")
+        expectEqual(protectedReads, 0, "automatic bank capture rejects a secret Enum table before indexing")
+        expectEqual(#history, 2, "a secret Enum table does not update bank history")
+        _G.Enum = oldEnum
+        secretTables[protectedEnum] = nil
+        local oldBankTypes = Enum.BankType
+        secretTables[protectedEnum] = true
+        Enum.BankType = protectedEnum
+        captureFrame.scripts.OnEvent(captureFrame, "BANKFRAME_OPENED")
+        expectEqual(protectedReads, 0, "automatic bank capture rejects a secret BankType table before indexing")
+        Enum.BankType = oldBankTypes
+        secretTables[protectedEnum] = nil
+        local savedBank = MclarionWowData.bank
+        MclarionWowData.bank = "unsupported"
+        captureFrame.scripts.OnEvent(captureFrame, "BANKFRAME_OPENED")
+        expectEqual(MclarionWowData.bank, "unsupported", "invalid bank storage is preserved")
+        SlashCmdList.MCLARIONWOWUI()
+        local panel
+        for _, frame in ipairs(frames) do
+            if frame.name == "MclarionWowSettingsFrame" then panel = frame end
+        end
+        local refused = false
+        for _, label in ipairs(panel.fontStrings) do
+            if label.text and label.text:find("Bank: Capture unavailable", 1, true) then refused = true end
+        end
+        expectTrue(refused, "settings report a refused automatic bank snapshot")
+        MclarionWowData.bank = savedBank
+    end
+    C_Container.GetContainerNumSlots, C_Container.GetContainerItemInfo = originalSlots, originalInfo
+    C_Bank.FetchPurchasedBankTabData, _G.BankFrame = originalTabs, originalBankFrame
+end
+
+expectTrue(type(SlashCmdList.MCLARIONWOWUI) == "function", "provides an addon settings window")
+if type(SlashCmdList.MCLARIONWOWUI) == "function" then
+    SlashCmdList.MCLARIONWOWUI()
+    local panel
+    for _, frame in ipairs(frames) do
+        if frame.name == "MclarionWowSettingsFrame" then panel = frame end
+    end
+    expectTrue(panel ~= nil and panel:IsShown(), "settings window can be opened in game")
+    expectTrue(panel and panel.fontStrings and #panel.fontStrings >= 4,
+        "settings window reports export, bank, and combat-log status")
+    local settings = MclarionWowData.settings
+    expectTrue(settings and settings.autoCombatLog and settings.autoCharacterCapture and
+        settings.autoBagCapture and settings.autoBankCapture,
+        "opted-in automatic capture settings stay enabled")
+    local checkboxes = {}
+    for _, frame in ipairs(frames) do
+        if frame.parent == panel and frame.frameType == "CheckButton" then
+            checkboxes[#checkboxes + 1] = frame
+        end
+    end
+    expectEqual(#checkboxes, 4, "settings expose logging, character, bag and bank switches")
+    if #checkboxes == 4 then
+        checkboxes[1]:SetChecked(false)
+        checkboxes[1].scripts.OnClick(checkboxes[1])
+        expectEqual(settings.autoCombatLog, false, "logging preference persists in saved variables")
+        expectEqual(combatLogging, true, "auto-start switch does not silently stop active logging")
+        captureFrame.scripts.OnEvent(captureFrame, "PLAYER_ENTERING_WORLD")
+        expectEqual(combatLogging, true, "disabled auto-start leaves running logging unchanged")
+        combatLogging = true -- A different addon or the player enabled logging.
+        checkboxes[1]:SetChecked(true)
+        checkboxes[1].scripts.OnClick(checkboxes[1])
+        checkboxes[1]:SetChecked(false)
+        checkboxes[1].scripts.OnClick(checkboxes[1])
+        expectEqual(combatLogging, true, "disabling auto-start never stops another source's logging")
+        local function statusContains(message)
+            for _, label in ipairs(panel.fontStrings) do
+                if label.text and label.text:find(message, 1, true) then return true end
+            end
+            return false
+        end
+        expectTrue(statusContains("still on"), "logging switch reports when another source stays on")
+        combatLogging = false
+        checkboxes[1]:SetChecked(true)
+        checkboxes[1].scripts.OnClick(checkboxes[1])
+        checkboxes[2]:SetChecked(false)
+        checkboxes[2].scripts.OnClick(checkboxes[2])
+        local priorSnapshots = #MclarionWowData.characters["Player-1234-ABCDEF12"]
+        captureFrame.scripts.OnEvent(captureFrame, "PLAYER_EQUIPMENT_CHANGED")
+        expectEqual(#MclarionWowData.characters["Player-1234-ABCDEF12"], priorSnapshots,
+            "disabling character capture suppresses automatic identity snapshots")
+        checkboxes[2]:SetChecked(true)
+        checkboxes[2].scripts.OnClick(checkboxes[2])
+        checkboxes[3]:SetChecked(false)
+        checkboxes[3].scripts.OnClick(checkboxes[3])
+        local originalBagInfo = C_Container.GetContainerItemInfo
+        C_Container.GetContainerItemInfo = function(bag, slot)
+            if bag == 0 and slot == 1 then return { itemID = 4242, stackCount = 6 } end
+        end
+        local bagSnapshots = MclarionWowData.bags["Player-1234-ABCDEF12"]
+        local count = #bagSnapshots
+        captureFrame.scripts.OnEvent(captureFrame, "BAG_UPDATE_DELAYED")
+        expectEqual(#bagSnapshots, count, "disabled bag capture does not read/store bag changes")
+        C_Container.GetContainerItemInfo = originalBagInfo
+        checkboxes[3]:SetChecked(true)
+        checkboxes[3].scripts.OnClick(checkboxes[3])
+        local bagMap = MclarionWowData.bags
+        MclarionWowData.bags = "unsupported"
+        captureFrame.scripts.OnEvent(captureFrame, "BAG_OPEN", 0)
+        expectTrue(statusContains("Bags: Capture unavailable"),
+            "settings report rejected automatic bag storage")
+        MclarionWowData.bags = bagMap
+        local protectedItem = protectedSentinel()
+        secretValues[protectedItem] = true
+        C_Container.GetContainerItemInfo = function(bag)
+            if bag == 0 then return protectedItem end
+        end
+        captureFrame.scripts.OnEvent(captureFrame, "BAG_OPEN", 0)
+        expectTrue(statusContains("Bags: Capture unavailable"),
+            "settings report a protected bag scan without exposing item details")
+        C_Container.GetContainerItemInfo = originalBagInfo
+        secretValues[protectedItem] = nil
+        SlashCmdList.MCLARIONWOWBAGSEXPORT()
+        expectTrue(statusContains("Bags snapshot stored in memory"),
+            "manual bag export status distinguishes SavedVariables from a TXT file")
+        checkboxes[4]:SetChecked(false)
+        checkboxes[4].scripts.OnClick(checkboxes[4])
+        expectEqual(settings.autoBankCapture, false, "automatic bank preference persists in saved variables")
+        checkboxes[4]:SetChecked(true)
+        checkboxes[4].scripts.OnClick(checkboxes[4])
+    end
+    local originalLogging = LoggingCombat
+    local guardedLogging = function() error("protected logging API was invoked") end
+    secretValues[guardedLogging] = true
+    _G.LoggingCombat = guardedLogging
+    local safe = pcall(captureFrame.scripts.OnEvent, captureFrame, "PLAYER_ENTERING_WORLD")
+    expectTrue(safe, "protected combat-log API is never invoked by the automatic handler")
+    _G.LoggingCombat = originalLogging
+    secretValues[guardedLogging] = nil
+    combatLogging = false
+    MclarionWowData.settings.autoCombatLog = true
+    captureFrame.scripts.OnEvent(captureFrame, "PLAYER_ENTERING_WORLD")
+    expectTrue(combatLogging, "opted-in logging starts before a UI reload")
+    chunk("MclarionWow", {}) -- Simulate a UI reload while WoW leaves combat logging active.
+    local reloadedCapture
+    for _, frame in ipairs(frames) do
+        if frame.events and frame.events.PLAYER_ENTERING_WORLD then reloadedCapture = frame end
+    end
+    reloadedCapture.scripts.OnEvent(reloadedCapture, "PLAYER_ENTERING_WORLD")
+    SlashCmdList.MCLARIONWOWUI()
+    local reloadedPanel
+    for _, frame in ipairs(frames) do
+        if frame.name == "MclarionWowSettingsFrame" then reloadedPanel = frame end
+    end
+    local autoStart, stopNow
+    for _, frame in ipairs(frames) do
+        if frame.parent == reloadedPanel and frame.frameType == "CheckButton" and not autoStart then
+            autoStart = frame
+        elseif frame.parent == reloadedPanel and frame.frameType == "Button" and
+            frame.text == "Stop logging now" then
+            stopNow = frame
+        end
+    end
+    autoStart:SetChecked(false)
+    autoStart.scripts.OnClick(autoStart)
+    expectEqual(combatLogging, true, "switch-off after reload never guesses who started active logging")
+    local attributedElsewhere = false
+    for _, label in ipairs(reloadedPanel.fontStrings) do
+        if label.text and label.text:find("other source", 1, true) then attributedElsewhere = true end
+    end
+    expectEqual(attributedElsewhere, false, "status never misattributes the logging source after reload")
+    expectTrue(stopNow ~= nil, "explicit Stop logging now control survives a UI reload")
+    if stopNow then stopNow.scripts.OnClick(stopNow) end
+    expectEqual(combatLogging, false, "explicit player action can stop logging after a UI reload")
+    expectEqual(MclarionWowData.settings.autoCombatLog, false,
+        "explicit stop also disables automatic restart on the next world entry")
 end
 
 if failures > 0 then

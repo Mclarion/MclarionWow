@@ -66,7 +66,7 @@ The test uses mocked WoW APIs but executes the actual addon Lua file:
 (cd tests && lua5.4 test_mclarion_wow.lua)
 ```
 
-It covers all four wire formats, manual exports, combat/protected-value refusal, stale-popup replacement, first-run opt-in and settings, bounded character/bag/bank histories, native logging safeguards, account-bank refusal, visible bank-page capture and in-memory/failure status. Ordinary bag/character/timer events do not call bank APIs. Mock secret sentinels trap premature field access; in-game 0.8.0 behavior and a full client-restart SavedVariables round trip remain unverified.
+It covers all four wire formats, manual exports, combat/protected-value refusal, stale-popup replacement, first-run opt-in and settings, bounded character/bag/bank histories, native logging safeguards, account-bank refusal, visible bank-page capture and in-memory/failure status. Ordinary bag/character/timer events do not call bank APIs. Mock secret sentinels trap premature field access; in-game 0.8.0 behavior and a full client-restart SavedVariables round trip remain unverified. See [TODO.md](TODO.md) for the next chat's addon-only verification handoff.
 
 ## Manual client test checklist
 
