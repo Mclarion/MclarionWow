@@ -122,7 +122,9 @@ _G.CreateFrame = function(frameType, name, parent, template)
     function frame:CreateFontString()
         local fontString = {}
         function fontString:SetPoint() end
-        function fontString:SetText() end
+        function fontString:SetText(text) self.text = text end
+        self.fontStrings = self.fontStrings or {}
+        self.fontStrings[#self.fontStrings + 1] = fontString
         return fontString
     end
     frames[#frames + 1] = frame
@@ -292,9 +294,27 @@ if type(MclarionWow_ProbeBank) == "function" then
         "bank probe reports bounded counts without any item IDs")
     expectTrue(sameData(MclarionWowData, expectedStorage), "bank probe leaves nested saved data unchanged")
     expectTrue(type(SlashCmdList.MCLARIONWOWBANKPROBE) == "function", "registers manual bank probe command")
+    SlashCmdList.MCLARIONWOWBANKPROBE()
+    local bankBox, bankWindow
+    for _, frame in ipairs(frames) do
+        if frame.frameType == "EditBox" then bankBox = frame end
+        if frame.name == "MclarionWowExportFrame" then bankWindow = frame end
+    end
+    expectTrue(bankBox and bankWindow and bankWindow.shown and bankBox.focused and bankBox.highlighted,
+        "bank count report opens a selectable popup")
+    expectEqual(bankBox and bankBox:GetText(), report, "bank popup contains only the count report")
+    expectTrue(bankWindow and bankWindow.fontStrings[1].text:find("Bank diagnostic", 1, true) ~= nil,
+        "bank popup identifies the count-only diagnostic")
+    expectTrue(sameData(MclarionWowData, expectedStorage), "bank popup leaves nested saved data unchanged")
+    bankWindow:Hide()
+    SlashCmdList.MCLARIONWOWBANKPROBE()
+    expectTrue(bankWindow.shown, "a second manual bank probe reopens a hidden copy-data popup")
     inCombat = true
     report, problem = MclarionWow_ProbeBank()
     expectTrue(report == nil and problem:find("combat", 1, true) ~= nil, "bank probe refuses combat")
+    SlashCmdList.MCLARIONWOWBANKPROBE()
+    expectTrue(bankBox and bankBox:GetText():find("unavailable", 1, true) ~= nil,
+        "bank popup shows a refusal rather than stale counts during combat")
     inCombat = false
     local oldCombat = InCombatLockdown
     _G.InCombatLockdown = nil
@@ -527,6 +547,12 @@ end
 expectTrue(editBox ~= nil and editBox.shown, "slash command shows selectable edit box")
 expectEqual(editBox:GetText(), expected, "slash command populates current export")
 expectTrue(editBox.highlighted, "slash command selects export for manual copy")
+for _, frame in ipairs(frames) do
+    if frame.name == "MclarionWowExportFrame" then
+        expectTrue(frame.fontStrings[1].text:find("manual snapshot export", 1, true) ~= nil,
+            "character export restores the popup title after a bank diagnostic")
+    end
+end
 
 local saved = MclarionWowData
 expectTrue(type(saved) == "table" and saved.schema == 1 and

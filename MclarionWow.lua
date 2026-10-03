@@ -587,7 +587,7 @@ local function saveBagSnapshot(guid, export)
 end
 
 local window
-local exportBox
+local exportBox, windowTitle, windowInstructions
 
 local function createWindow()
     window = CreateFrame("Frame", "MclarionWowExportFrame", UIParent, "BasicFrameTemplateWithInset")
@@ -600,13 +600,13 @@ local function createWindow()
     window:SetScript("OnDragStart", window.StartMoving)
     window:SetScript("OnDragStop", window.StopMovingOrSizing)
 
-    local title = window:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    title:SetPoint("TOPLEFT", 12, -8)
-    title:SetText("MclarionWow — manual snapshot export")
+    windowTitle = window:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    windowTitle:SetPoint("TOPLEFT", 12, -8)
+    windowTitle:SetText("MclarionWow — manual snapshot export")
 
-    local instructions = window:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    instructions:SetPoint("TOPLEFT", 16, -38)
-    instructions:SetText("The text below is selected. Press Ctrl+C, then paste it where you choose.")
+    windowInstructions = window:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    windowInstructions:SetPoint("TOPLEFT", 16, -38)
+    windowInstructions:SetText("The text below is selected. Press Ctrl+C, then paste it where you choose.")
 
     exportBox = CreateFrame("EditBox", "MclarionWowExportEditBox", window, "InputBoxTemplate")
     exportBox:SetPoint("TOPLEFT", 18, -68)
@@ -623,10 +623,17 @@ local function createWindow()
     window:Hide()
 end
 
+local function setWindowMode(bankDiagnostic)
+    if not window then createWindow() end
+    windowTitle:SetText(bankDiagnostic and "MclarionWow — Bank diagnostic (counts only)" or
+        "MclarionWow — manual snapshot export")
+    windowInstructions:SetText(bankDiagnostic and
+        "Only aggregate counts are shown. Press Ctrl+C to copy; no bank items are saved." or
+        "The text below is selected. Press Ctrl+C, then paste it where you choose.")
+end
+
 local function showExport()
-    if not window then
-        createWindow()
-    end
+    setWindowMode(false)
 
     local ok, export, err, guid = pcall(MclarionWow_BuildExport)
     if ok and export then
@@ -647,7 +654,7 @@ SLASH_MCLARIONWOW1 = "/mhwow"
 SlashCmdList.MCLARIONWOW = showExport
 
 local function showBagExport()
-    if not window then createWindow() end
+    setWindowMode(false)
     local ok, export, err, guid = pcall(MclarionWow_BuildBagExport)
     if ok and export then
         local savedOk, stored, storageError = pcall(saveBagSnapshot, guid, export)
@@ -672,7 +679,7 @@ SlashCmdList.MCLARIONWOWBAGSEXPORT = showBagExport
 
 SLASH_MCLARIONWOWITEMSEXPORT1 = "/mhwowitemsexport"
 SlashCmdList.MCLARIONWOWITEMSEXPORT = function()
-    if not window then createWindow() end
+    setWindowMode(false)
     local ok, export, err = pcall(MclarionWow_BuildItemExport)
     exportBox:SetText(ok and (export or "Item export unavailable: " .. (err or "unknown error")) or
         "Item export unavailable: client refused the scan.")
@@ -691,7 +698,13 @@ end
 SLASH_MCLARIONWOWBANKPROBE1 = "/mhwowbankprobe"
 SlashCmdList.MCLARIONWOWBANKPROBE = function()
     local ok, report, err = pcall(MclarionWow_ProbeBank)
-    print("MclarionWow: " .. (ok and (report or err) or "Bank probe unavailable."))
+    setWindowMode(true)
+    exportBox:SetText(ok and (report or "Bank probe unavailable: " .. (err or "unknown error")) or
+        "Bank probe unavailable: client refused the scan.")
+    window:Show()
+    exportBox:Show()
+    exportBox:SetFocus()
+    exportBox:HighlightText()
 end
 
 local captureFrame = CreateFrame("Frame")
