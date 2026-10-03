@@ -722,6 +722,33 @@ local export, err = MclarionWow_BuildExport()
 expectEqual(err, nil, "valid snapshot has no error")
 expectEqual(export, expected, "builds exactly twelve escaped pipe-separated fields")
 expectEqual(select(2, export:gsub("|", "")), 11, "export has exactly twelve fields")
+for _, apiName in ipairs({ "GetServerTime", "UnitGUID", "UnitName", "GetRealmName",
+    "UnitClass", "UnitLevel", "GetZoneText", "GetBuildInfo", "GetInventoryItemID" }) do
+    local original = _G[apiName]
+    secretValues[original] = true
+    local safe, blocked, reason = pcall(MclarionWow_BuildExport)
+    expectTrue(safe and blocked == nil and type(reason) == "string" and
+        reason:find("protected", 1, true) ~= nil,
+        "character export rejects protected " .. apiName .. " before invocation")
+    secretValues[original] = nil
+end
+for _, apiName in ipairs({ "GetServerTime", "UnitGUID", "GetBuildInfo" }) do
+    local original = _G[apiName]
+    secretValues[original] = true
+    local safe, blocked, reason = pcall(MclarionWow_BuildBagExport)
+    expectTrue(safe and blocked == nil and type(reason) == "string" and
+        reason:find("protected", 1, true) ~= nil,
+        "bag export rejects protected " .. apiName .. " before scanning")
+    secretValues[original] = nil
+end
+local originalClass, originalRealm = UnitClass, GetRealmName
+_G.UnitClass = function() return "Rogue", "ROGUE", 4 end
+_G.GetRealmName = function() return "Classic Beta PvP 2" end
+local rogueExport = MclarionWow_BuildExport()
+expectTrue(rogueExport:find("|Classic Beta PvP 2|ROGUE|", 1, true) ~= nil and
+    select(2, rogueExport:gsub("|", "")) == 11,
+    "rogue class stays distinct from a realm ending in a number")
+_G.UnitClass, _G.GetRealmName = originalClass, originalRealm
 
 local originalMap = C_Map
 local protectedMap = protectedSentinel()
@@ -835,6 +862,22 @@ end
 expectTrue(editBox ~= nil and editBox.shown, "slash command shows selectable edit box")
 expectEqual(editBox:GetText(), expected, "slash command populates current export")
 expectTrue(editBox.highlighted, "slash command selects export for manual copy")
+editBox:SetText("corrupted by an accidental keypress")
+expectTrue(type(editBox.scripts.OnTextChanged) == "function",
+    "export popup guards against accidental edits")
+if type(editBox.scripts.OnTextChanged) == "function" then
+    editBox.scripts.OnTextChanged(editBox, true)
+    expectEqual(editBox:GetText(), expected, "popup restores the original export when typing replaces selection")
+    now = now + 1
+    SlashCmdList.MCLARIONWOW()
+    local refreshed = editBox:GetText()
+    expectTrue(refreshed ~= expected, "manual re-export replaces the popup with a fresh snapshot")
+    editBox:SetText("accidental edit after re-export")
+    editBox.scripts.OnTextChanged(editBox, true)
+    expectEqual(editBox:GetText(), refreshed, "popup restores the latest export rather than stale text")
+    now = now - 1
+    SlashCmdList.MCLARIONWOW()
+end
 for _, frame in ipairs(frames) do
     if frame.name == "MclarionWowExportFrame" then
         expectTrue(frame.fontStrings[1].text:find("manual snapshot export", 1, true) ~= nil,

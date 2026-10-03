@@ -3,7 +3,7 @@
 ## Title: MclarionWow
 ## Notes: Local Forever snapshots plus manual bag, item, bank, and bank-metadata exports.
 ## Author: Mclarion
-## Version: 0.7.0
+## Version: 0.7.1
 ## SavedVariables: MclarionWowData
 
 MclarionWow.lua

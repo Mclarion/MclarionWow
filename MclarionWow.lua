@@ -38,12 +38,24 @@ local function nonnegativeInteger(value)
     return type(value) == "number" and value >= 0 and value == math.floor(value)
 end
 
+local function exportApisAvailable(...)
+    for index = 1, select("#", ...) do
+        local api = select(index, ...)
+        if isSecret(api) then return nil, "Export API is protected by the client." end
+        if type(api) ~= "function" then return nil, "Export API is unavailable." end
+    end
+    return true
+end
+
 function MclarionWow_BuildExport()
     local combat, combatError = combatStatus()
     if combat == nil then return nil, combatError end
     if combat then
         return nil, "MclarionWow will not export while you are in combat."
     end
+    local apisAvailable, apiError = exportApisAvailable(GetServerTime, UnitGUID, UnitName,
+        GetRealmName, UnitClass, UnitLevel, GetZoneText, GetBuildInfo, GetInventoryItemID)
+    if not apisAvailable then return nil, apiError end
 
     local serverTime = GetServerTime()
     local playerGuid = UnitGUID("player")
@@ -414,6 +426,8 @@ function MclarionWow_BuildBankExport()
 end
 
 function MclarionWow_BuildBagExport()
+    local apisAvailable, apiError = exportApisAvailable(GetServerTime, UnitGUID, GetBuildInfo)
+    if not apisAvailable then return nil, apiError end
     local report, totalsOrError = scanBags(true)
     if not report then return nil, totalsOrError end
     local timestamp = GetServerTime()
@@ -712,6 +726,12 @@ end
 
 local window
 local exportBox, windowTitle, windowInstructions
+local displayedExport
+
+local function setExportText(text)
+    displayedExport = text
+    exportBox:SetText(text)
+end
 
 local function createWindow()
     window = CreateFrame("Frame", "MclarionWowExportFrame", UIParent, "BasicFrameTemplateWithInset")
@@ -739,6 +759,13 @@ local function createWindow()
     exportBox:SetMultiLine(true)
     exportBox:SetFontObject(ChatFontNormal)
     exportBox:SetTextInsets(8, 8, 8, 8)
+    exportBox:SetScript("OnTextChanged", function(self, userInput)
+        if userInput and displayedExport then
+            -- Typing with the export selected would replace part of a valid payload.
+            self:SetText(displayedExport)
+            self:HighlightText()
+        end
+    end)
     exportBox:SetScript("OnEscapePressed", function(self)
         self:ClearFocus()
         window:Hide()
@@ -762,10 +789,10 @@ local function showExport()
     local ok, export, err, guid = pcall(MclarionWow_BuildExport)
     if ok and export then
         local savedOk, stored, storageError = pcall(saveSnapshot, guid, export)
-        exportBox:SetText(savedOk and stored and export or "Storage unavailable: " ..
+        setExportText(savedOk and stored and export or "Storage unavailable: " ..
             (savedOk and (storageError or "unknown error") or "client refused to save."))
     else
-        exportBox:SetText("Export unavailable: " ..
+        setExportText("Export unavailable: " ..
             (ok and (err or "unknown error") or "client refused the scan."))
     end
     window:Show()
@@ -783,13 +810,13 @@ local function showBagExport()
     if ok and export then
         local savedOk, stored, storageError = pcall(saveBagSnapshot, guid, export)
         if savedOk and stored then
-            exportBox:SetText(export)
+            setExportText(export)
         else
-            exportBox:SetText("Storage unavailable: " ..
+            setExportText("Storage unavailable: " ..
                 (savedOk and (storageError or "unknown error") or "client refused to save."))
         end
     else
-        exportBox:SetText("Bag export unavailable: " ..
+        setExportText("Bag export unavailable: " ..
             (ok and (err or "unknown error") or "client refused the scan."))
     end
     window:Show()
@@ -805,7 +832,7 @@ SLASH_MCLARIONWOWITEMSEXPORT1 = "/mhwowitemsexport"
 SlashCmdList.MCLARIONWOWITEMSEXPORT = function()
     setWindowMode(false)
     local ok, export, err = pcall(MclarionWow_BuildItemExport)
-    exportBox:SetText(ok and (export or "Item export unavailable: " .. (err or "unknown error")) or
+    setExportText(ok and (export or "Item export unavailable: " .. (err or "unknown error")) or
         "Item export unavailable: client refused the scan.")
     window:Show()
     exportBox:Show()
@@ -823,7 +850,7 @@ SLASH_MCLARIONWOWBANKPROBE1 = "/mhwowbankprobe"
 SlashCmdList.MCLARIONWOWBANKPROBE = function()
     local ok, report, err = pcall(MclarionWow_ProbeBank)
     setWindowMode(true)
-    exportBox:SetText(ok and (report or "Bank probe unavailable: " .. (err or "unknown error")) or
+    setExportText(ok and (report or "Bank probe unavailable: " .. (err or "unknown error")) or
         "Bank probe unavailable: client refused the scan.")
     window:Show()
     exportBox:Show()
@@ -838,7 +865,7 @@ SlashCmdList.MCLARIONWOWBANKSEXPORT = function()
     windowTitle:SetText("MclarionWow — Bank item export (manual only)")
     windowInstructions:SetText(
         "Review before copying. No bank item data is saved; press Ctrl+C to copy where you choose.")
-    exportBox:SetText(ok and (export or "Bank export unavailable: " .. (err or "unknown error")) or
+    setExportText(ok and (export or "Bank export unavailable: " .. (err or "unknown error")) or
         "Bank export unavailable: client refused the scan.")
     window:Show()
     exportBox:Show()
@@ -868,15 +895,15 @@ SlashCmdList.MCLARIONWOWBANKITEMSEXPORT = function(message)
         "Review MHWOWI1 before copying. Use /mhwowbankitemsexport 2 for the next page when shown.")
     local page, pageError = parseBankItemPage(message)
     if not page then
-        exportBox:SetText("Bank item metadata export unavailable: " .. pageError)
+        setExportText("Bank item metadata export unavailable: " .. pageError)
     else
         local ok, export, err, _, selectedPage, pageCount = pcall(MclarionWow_BuildBankItemExport, page)
         if ok and export then
             windowTitle:SetText(string.format(
                 "MclarionWow — Bank item metadata (manual only, page %d/%d)", selectedPage, pageCount))
-            exportBox:SetText(export)
+            setExportText(export)
         else
-            exportBox:SetText("Bank item metadata export unavailable: " ..
+            setExportText("Bank item metadata export unavailable: " ..
                 (ok and (err or "unknown error") or "client refused the scan."))
         end
     end
