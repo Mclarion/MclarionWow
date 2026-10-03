@@ -1,9 +1,9 @@
 ## Interface: 16001
 ## AllowLoadGameType: camelot
 ## Title: MclarionWow
-## Notes: Local Forever snapshots, manual exports, and a count-only bank diagnostic.
+## Notes: Local Forever snapshots plus manual bag, item, bank, and bank-metadata exports.
 ## Author: Mclarion
-## Version: 0.6.2
+## Version: 0.7.0
 ## SavedVariables: MclarionWowData
 
 MclarionWow.lua

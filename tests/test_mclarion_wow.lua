@@ -377,6 +377,294 @@ if type(MclarionWow_ProbeBank) == "function" then
     MclarionWowData = rootBefore
 end
 
+expectTrue(type(MclarionWow_BuildBankExport) == "function",
+    "provides a manual character-bank item export builder")
+if type(MclarionWow_BuildBankExport) == "function" then
+    local oldSlots, oldInfo = C_Container.GetContainerNumSlots, C_Container.GetContainerItemInfo
+    local oldTabs = C_Bank.FetchPurchasedBankTabData
+    C_Bank.FetchPurchasedBankTabData = function() return { { ID = 7 }, { ID = 6 } } end
+    C_Container.GetContainerNumSlots = function(tab) return tab == 6 and 3 or tab == 7 and 2 or 0 end
+    C_Container.GetContainerItemInfo = function(tab, slot)
+        if tab == 6 and slot == 1 then return { itemID = 4242, stackCount = 3 } end
+        if tab == 6 and slot == 2 then return { itemID = 100, stackCount = 5 } end
+        if tab == 6 and slot == 3 then return { itemID = 4242, stackCount = 2 } end
+        if tab == 7 and slot == 1 then return { itemID = 100, stackCount = 4 } end
+    end
+    local savedBefore = MclarionWowData
+    MclarionWowData = { schema = 1, characters = { ["Player-1234-ABCDEF12"] = { "existing" } } }
+    local expectedStorage = { schema = 1, characters = { ["Player-1234-ABCDEF12"] = { "existing" } } }
+    local bankExport, bankError, bankGuid = MclarionWow_BuildBankExport()
+    expectEqual(bankError, nil, "viewable own character bank exports without error")
+    expectEqual(bankGuid, "Player-1234-ABCDEF12", "bank export returns the validated player GUID")
+    expectEqual(bankExport,
+        "MHWOWK1|forever|1720000000|Player-1234-ABCDEF12|6:100:5,6:4242:5,7:100:4|70170",
+        "bank export sorts by tab then item ID and aggregates only within each tab")
+    expectTrue(sameData(MclarionWowData, expectedStorage),
+        "building a bank export leaves nested saved data unchanged")
+
+    C_Container.GetContainerNumSlots = function() return 0 end
+    C_Container.GetContainerItemInfo = function() error("empty tabs must not read item slots") end
+    bankExport, bankError = MclarionWow_BuildBankExport()
+    expectEqual(bankError, nil, "empty purchased character bank exports without error")
+    expectEqual(bankExport, "MHWOWK1|forever|1720000000|Player-1234-ABCDEF12||70170",
+        "empty bank keeps an empty fifth field")
+
+    inCombat = true
+    bankExport, bankError = MclarionWow_BuildBankExport()
+    expectTrue(bankExport == nil and bankError:find("combat", 1, true) ~= nil,
+        "bank export refuses combat")
+    inCombat = false
+    local oldView = C_Bank.CanViewBank
+    C_Bank.CanViewBank = function() return false end
+    bankExport, bankError = MclarionWow_BuildBankExport()
+    expectTrue(bankExport == nil and bankError:find("viewable", 1, true) ~= nil,
+        "bank export refuses a closed character bank")
+    C_Bank.CanViewBank = oldView
+
+    C_Bank.FetchPurchasedBankTabData = function() return { { ID = 15 } } end
+    local scanCalls = 0
+    C_Container.GetContainerNumSlots = function() scanCalls = scanCalls + 1; return 0 end
+    bankExport, bankError = MclarionWow_BuildBankExport()
+    expectTrue(bankExport == nil and bankError:find("tab", 1, true) ~= nil,
+        "bank export rejects account-bank tab IDs")
+    expectEqual(scanCalls, 0, "bank export validates all tab IDs before scanning any slots")
+
+    local protected = protectedSentinel()
+    secretValues[protected] = true
+    C_Bank.FetchPurchasedBankTabData = function() return { { ID = protected } } end
+    local safe
+    safe, bankExport, bankError = pcall(MclarionWow_BuildBankExport)
+    expectTrue(safe and bankExport == nil and bankError:find("protected", 1, true) ~= nil,
+        "bank export rejects protected tab IDs before comparison")
+    secretValues[protected] = nil
+
+    scanCalls = 0
+    C_Bank.FetchPurchasedBankTabData = function() return { [1] = { ID = 6 }, [3] = { ID = 7 } } end
+    C_Container.GetContainerNumSlots = function() scanCalls = scanCalls + 1; return 0 end
+    safe, bankExport, bankError = pcall(MclarionWow_BuildBankExport)
+    expectTrue(safe and bankExport == nil and bankError:find("tab", 1, true) ~= nil,
+        "bank export rejects sparse tab metadata")
+    expectEqual(scanCalls, 0, "sparse tab metadata is rejected before slot reads")
+
+    C_Bank.FetchPurchasedBankTabData = function() return { { ID = 6 } } end
+    C_Container.GetContainerNumSlots = function() return 1 end
+    secretValues[protected] = true
+    C_Container.GetContainerItemInfo = function() return { itemID = protected, stackCount = 1 } end
+    safe, bankExport, bankError = pcall(MclarionWow_BuildBankExport)
+    expectTrue(safe and bankExport == nil and bankError:find("protected", 1, true) ~= nil,
+        "bank export rejects protected item IDs before table indexing or conversion")
+    C_Container.GetContainerItemInfo = function() return { itemID = 1, stackCount = protected } end
+    safe, bankExport, bankError = pcall(MclarionWow_BuildBankExport)
+    expectTrue(safe and bankExport == nil and bankError:find("protected", 1, true) ~= nil,
+        "bank export rejects protected stack counts before arithmetic")
+    local protectedItem = protectedSentinel()
+    secretTables[protectedItem] = true
+    C_Container.GetContainerItemInfo = function() return protectedItem end
+    safe, bankExport, bankError = pcall(MclarionWow_BuildBankExport)
+    expectTrue(safe and bankExport == nil and bankError:find("protected", 1, true) ~= nil,
+        "bank export rejects a protected item table before indexing")
+    secretTables[protectedItem] = nil
+    secretValues[protected] = nil
+
+    C_Container.GetContainerItemInfo = function() return { itemID = 1, stackCount = 2147483647 } end
+    C_Container.GetContainerNumSlots = function() return 2 end
+    bankExport, bankError = MclarionWow_BuildBankExport()
+    expectTrue(bankExport == nil and bankError:find("total", 1, true) ~= nil,
+        "bank export refuses per-tab item total overflow")
+
+    local tabs = {}
+    for tabId = 6, 14 do tabs[#tabs + 1] = { ID = tabId } end
+    C_Bank.FetchPurchasedBankTabData = function() return tabs end
+    C_Container.GetContainerNumSlots = function() return 120 end
+    C_Container.GetContainerItemInfo = function(tab, slot)
+        return { itemID = (tab - 6) * 120 + slot, stackCount = 1 }
+    end
+    bankExport, bankError = MclarionWow_BuildBankExport()
+    expectTrue(bankExport ~= nil and bankError == nil and #bankExport <= 32768,
+        "bank export permits exactly 1080 bounded sorted entries")
+    C_Container.GetContainerNumSlots = function(tab) return tab == 6 and 120 or 0 end
+    C_Container.GetContainerItemInfo = function(tab, slot)
+        return { itemID = slot, stackCount = 1 }
+    end
+    local extraTabs = {}
+    for index = 1, 10 do extraTabs[index] = { ID = 5 + index } end
+    C_Bank.FetchPurchasedBankTabData = function() return extraTabs end
+    bankExport, bankError = MclarionWow_BuildBankExport()
+    expectTrue(bankExport == nil and bankError:find("tab", 1, true) ~= nil,
+        "more than the nine supported character-bank tabs fails closed")
+
+    C_Bank.FetchPurchasedBankTabData = function() return { { ID = 6 } } end
+    C_Container.GetContainerNumSlots = function() return 0 end
+    local oldTime, oldGuid, oldBuild = GetServerTime, UnitGUID, GetBuildInfo
+    _G.GetServerTime = function() return 253402300800 end
+    bankExport, bankError = MclarionWow_BuildBankExport()
+    expectTrue(bankExport == nil and bankError:find("metadata", 1, true) ~= nil,
+        "bank export rejects timestamps beyond the parser range")
+    _G.GetServerTime = oldTime
+    _G.UnitGUID = function() return "Player-|bad" end
+    bankExport, bankError = MclarionWow_BuildBankExport()
+    expectTrue(bankExport == nil and bankError:find("metadata", 1, true) ~= nil,
+        "bank export rejects malformed player GUID metadata")
+    _G.UnitGUID = oldGuid
+    _G.GetBuildInfo = function() return "1.60.1", "0", "Oct 1 2026", 16001 end
+    bankExport, bankError = MclarionWow_BuildBankExport()
+    expectTrue(bankExport == nil and bankError:find("build", 1, true) ~= nil,
+        "bank export rejects invalid build metadata")
+    _G.GetBuildInfo = oldBuild
+    local protectedTimeApi = function() error("protected time API was invoked") end
+    secretValues[protectedTimeApi] = true
+    _G.GetServerTime = protectedTimeApi
+    safe, bankExport, bankError = pcall(MclarionWow_BuildBankExport)
+    expectTrue(safe and bankExport == nil and bankError:find("protected", 1, true) ~= nil,
+        "bank export rejects a protected metadata API before invocation")
+    _G.GetServerTime = oldTime
+    secretValues[protectedTimeApi] = nil
+
+    expectEqual(SLASH_MCLARIONWOWBANKSEXPORT1, "/mhwowbanksexport",
+        "registers the exact bank export slash command")
+    expectTrue(type(SlashCmdList.MCLARIONWOWBANKSEXPORT) == "function",
+        "registers the manual-only character-bank export command")
+    C_Bank.FetchPurchasedBankTabData = function() return { { ID = 6 } } end
+    C_Container.GetContainerNumSlots = function() return 1 end
+    C_Container.GetContainerItemInfo = function() return { itemID = 4242, stackCount = 3 } end
+    SlashCmdList.MCLARIONWOWBANKSEXPORT()
+    local bankBox, bankWindow
+    for _, frame in ipairs(frames) do
+        if frame.frameType == "EditBox" then bankBox = frame end
+        if frame.name == "MclarionWowExportFrame" then bankWindow = frame end
+    end
+    expectEqual(bankBox and bankBox:GetText(),
+        "MHWOWK1|forever|1720000000|Player-1234-ABCDEF12|6:4242:3|70170",
+        "manual bank command shows the exact selectable export")
+    expectTrue(bankWindow and bankWindow.shown and bankBox.focused and bankBox.highlighted,
+        "manual bank export opens and selects the copy box")
+    expectTrue(bankWindow and bankWindow.fontStrings[1].text:find("Bank item export", 1, true) ~= nil,
+        "bank item export is clearly distinguished from the count-only diagnostic")
+    expectTrue(sameData(MclarionWowData, expectedStorage),
+        "manual bank export never writes SavedVariables")
+    inCombat = true
+    SlashCmdList.MCLARIONWOWBANKSEXPORT()
+    expectTrue(bankBox and bankBox:GetText():find("unavailable", 1, true) ~= nil and
+        bankBox:GetText():find("MHWOWK1", 1, true) == nil,
+        "manual bank command replaces stale export text with combat refusal")
+    inCombat = false
+
+    C_Bank.FetchPurchasedBankTabData = oldTabs
+    C_Container.GetContainerNumSlots = oldSlots
+    C_Container.GetContainerItemInfo = oldInfo
+    MclarionWowData = savedBefore
+end
+
+expectTrue(type(MclarionWow_BuildBankItemExport) == "function",
+    "provides a manual character-bank metadata export builder")
+if type(MclarionWow_BuildBankItemExport) == "function" then
+    local oldSlots, oldInfo = C_Container.GetContainerNumSlots, C_Container.GetContainerItemInfo
+    local oldTabs, oldView = C_Bank.FetchPurchasedBankTabData, C_Bank.CanViewBank
+    local oldItemInfo = C_Item.GetItemInfo
+    C_Bank.FetchPurchasedBankTabData = function() return { { ID = 6 } } end
+    C_Container.GetContainerNumSlots = function() return 2 end
+    C_Container.GetContainerItemInfo = function(_, slot)
+        if slot == 1 then return { itemID = 9001, stackCount = 1 } end
+        if slot == 2 then return { itemID = 9001, stackCount = 2 } end
+    end
+    C_Item.GetItemInfo = function(itemId)
+        if itemId == 9001 then
+            return "Bank-only Relic", "|Hitem:9001:0|h[Bank-only Relic]|h", 3, 70, 60,
+                "Armor", "Miscellaneous", 20, "", 987654, 2500, 4, 0, 1, 11,
+                nil, false, "Found only in the character bank."
+        end
+    end
+    local savedBefore = MclarionWowData
+    MclarionWowData = { schema = 1, characters = { ["Player-1234-ABCDEF12"] = { "existing" } } }
+    local expectedStorage = { schema = 1, characters = { ["Player-1234-ABCDEF12"] = { "existing" } } }
+    local export, exportError, exportGuid, page, pages = MclarionWow_BuildBankItemExport()
+    expectEqual(exportError, nil, "bank-only metadata exports from a viewable own character bank")
+    expectEqual(exportGuid, "Player-1234-ABCDEF12", "bank metadata export returns the player GUID")
+    expectEqual(page, 1, "bank metadata export defaults to the first page")
+    expectEqual(pages, 1, "one bank-only item fits on one metadata page")
+    expectTrue(type(export) == "string" and export:find("MHWOWI1|forever|", 1, true) == 1 and
+        export:find("9001:42616E6B2D6F6E6C792052656C6963:", 1, true) ~= nil and
+        export:find("4242:", 1, true) == nil,
+        "bank metadata contains the bank-only name and excludes bag-only IDs")
+    expectTrue(sameData(MclarionWowData, expectedStorage),
+        "bank metadata export never writes SavedVariables")
+
+    local ids = {}
+    for id = 1, 129 do ids[id] = id end
+    C_Bank.FetchPurchasedBankTabData = function() return { { ID = 6 }, { ID = 7 } } end
+    C_Container.GetContainerNumSlots = function(tab) return tab == 6 and 120 or 9 end
+    C_Container.GetContainerItemInfo = function(tab, slot)
+        local index = tab == 6 and slot or 120 + slot
+        return { itemID = ids[index], stackCount = 1 }
+    end
+    C_Item.GetItemInfo = function(itemId)
+        return "Item " .. itemId, "link" .. itemId, 1, 1, 1, "Misc", "Other", 1,
+            "", itemId, 0, 15, 0, 0, 0, nil, false, ""
+    end
+    export, exportError, _, page, pages = MclarionWow_BuildBankItemExport(2)
+    expectEqual(exportError, nil, "bank metadata supports a second bounded page")
+    expectEqual(page, 2, "bank metadata reports the selected page")
+    expectEqual(pages, 2, "129 bank IDs require two metadata pages")
+    expectTrue(export and export:find("129:4974656D20313239:", 1, true) ~= nil and
+        export:find("128:4974656D20313238:", 1, true) == nil,
+        "second bank metadata page contains only IDs after the first 128")
+    export, exportError = MclarionWow_BuildBankItemExport(3)
+    expectTrue(export == nil and exportError:find("page", 1, true) ~= nil,
+        "bank metadata refuses a page beyond the bounded result set")
+
+    local protected = protectedSentinel()
+    secretValues[protected] = true
+    C_Container.GetContainerNumSlots = function() return 1 end
+    C_Container.GetContainerItemInfo = function() return { itemID = protected, stackCount = 1 } end
+    local safe
+    safe, export, exportError = pcall(MclarionWow_BuildBankItemExport)
+    expectTrue(safe and export == nil and exportError:find("protected", 1, true) ~= nil,
+        "bank metadata refuses protected bank item IDs before indexing")
+    secretValues[protected] = nil
+    C_Container.GetContainerItemInfo = function() return { itemID = 9001, stackCount = 1 } end
+    C_Item.GetItemInfo = function()
+        return "Bank-only Relic", "link", 3, 70, 60, "Armor", "Miscellaneous", 20,
+            "", 987654, 2500, 4, 0, 1, 11, nil, false, protected
+    end
+    secretValues[protected] = true
+    safe, export, exportError = pcall(MclarionWow_BuildBankItemExport)
+    expectTrue(safe and export == nil and exportError:find("protected", 1, true) ~= nil,
+        "bank metadata refuses protected item metadata")
+    secretValues[protected] = nil
+
+    expectEqual(SLASH_MCLARIONWOWBANKITEMSEXPORT1, "/mhwowbankitemsexport",
+        "registers the exact manual bank metadata command")
+    expectTrue(type(SlashCmdList.MCLARIONWOWBANKITEMSEXPORT) == "function",
+        "registers the manual-only bank metadata handler")
+    C_Item.GetItemInfo = oldItemInfo
+    C_Container.GetContainerNumSlots = function() return 1 end
+    C_Container.GetContainerItemInfo = function() return { itemID = 4242, stackCount = 1 } end
+    SlashCmdList.MCLARIONWOWBANKITEMSEXPORT("")
+    local bankBox, bankWindow
+    for _, frame in ipairs(frames) do
+        if frame.frameType == "EditBox" then bankBox = frame end
+        if frame.name == "MclarionWowExportFrame" then bankWindow = frame end
+    end
+    expectTrue(bankBox and bankBox:GetText():find("MHWOWI1|forever|", 1, true) == 1,
+        "manual bank metadata command shows a selectable MHWOWI1 export")
+    C_Bank.CanViewBank = function() return false end
+    SlashCmdList.MCLARIONWOWBANKITEMSEXPORT("")
+    expectTrue(bankBox and bankBox:GetText():find("unavailable", 1, true) ~= nil and
+        bankBox:GetText():find("MHWOWI1", 1, true) == nil,
+        "closed-bank refusal replaces stale bank metadata text")
+    expectTrue(bankWindow and bankWindow.fontStrings[1].text:find("Bank item metadata", 1, true) ~= nil,
+        "bank metadata popup is clearly identified")
+    expectTrue(sameData(MclarionWowData, expectedStorage),
+        "manual bank metadata handler leaves SavedVariables unchanged")
+
+    C_Bank.FetchPurchasedBankTabData = oldTabs
+    C_Bank.CanViewBank = oldView
+    C_Container.GetContainerNumSlots = oldSlots
+    C_Container.GetContainerItemInfo = oldInfo
+    C_Item.GetItemInfo = oldItemInfo
+    MclarionWowData = savedBefore
+end
+
 local originalCombatCheck = InCombatLockdown
 local protectedCombat = protectedSentinel()
 secretValues[protectedCombat] = true
@@ -839,6 +1127,12 @@ for _, frame in ipairs(frames) do
 end
 expectTrue(captureFrame ~= nil, "registers an automatic capture frame")
 if captureFrame then
+    local automaticBankReads = 0
+    local originalAutomaticTabs = C_Bank.FetchPurchasedBankTabData
+    C_Bank.FetchPurchasedBankTabData = function(...)
+        automaticBankReads = automaticBankReads + 1
+        return originalAutomaticTabs(...)
+    end
     now = now + 1
     captureFrame.scripts.OnEvent(captureFrame, "PLAYER_ENTERING_WORLD")
     local snapshots = MclarionWowData.characters["Player-1234-ABCDEF12"]
@@ -892,6 +1186,9 @@ if captureFrame then
         #bagSnapshots == bagCount,
         "automatic events contain combat API failures without writing")
     _G.InCombatLockdown = originalCombat
+    expectEqual(automaticBankReads, 0,
+        "automatic capture never scans or exports character-bank items")
+    C_Bank.FetchPurchasedBankTabData = originalAutomaticTabs
 end
 
 if failures > 0 then

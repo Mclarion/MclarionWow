@@ -231,12 +231,13 @@ function MclarionWow_ProbeBags()
     return report, err
 end
 
--- Manual count-only diagnostic for purchased tabs in the character's own viewable bank.
--- Only aggregate counts leave this function; item IDs, per-item counts and snapshots do not.
-function MclarionWow_ProbeBank()
+-- Shared fail-closed scanner for explicitly requested reads of the logged-in
+-- character's own purchased, currently viewable bank tabs. Account-bank IDs
+-- are rejected before any slots are read. Results are never persisted here.
+local function scanCharacterBank(collectTotals)
     local combat, combatError = combatStatus()
     if combat == nil then return nil, combatError end
-    if combat then return nil, "Bank probe is unavailable during combat." end
+    if combat then return nil, "Bank scan is unavailable during combat." end
 
     if isSecret(C_Bank) or type(C_Bank) ~= "table" or issecrettable(C_Bank) or
         isSecret(Enum) or type(Enum) ~= "table" or issecrettable(Enum) or
@@ -252,6 +253,7 @@ function MclarionWow_ProbeBank()
     if not nonnegativeInteger(characterType) or characterType > 10 then
         return nil, "Character bank type is unavailable."
     end
+
     local anyViewable, canView, fetchTabs = C_Bank.AreAnyBankTypesViewable,
         C_Bank.CanViewBank, C_Bank.FetchPurchasedBankTabData
     local getSlots, getInfo = C_Container.GetContainerNumSlots, C_Container.GetContainerItemInfo
@@ -297,15 +299,25 @@ function MclarionWow_ProbeBank()
         tabIds[tabId] = true
         scannedIds[index] = tabId
     end
-    local slotsTotal, occupied, distinct, seen = 0, 0, 0, {}
-    for index = 1, tabCount do
-        local tabId = scannedIds[index]
+    table.sort(scannedIds)
+
+    local result = {
+        tabCount = tabCount,
+        slotsTotal = 0,
+        occupied = 0,
+        distinct = 0,
+        itemIds = {},
+        totalsByTab = collectTotals and {} or nil,
+    }
+    local seen = {}
+    for _, tabId in ipairs(scannedIds) do
         local slots = getSlots(tabId)
         if isSecret(slots) then return nil, "Bank slot count is protected by the client." end
         if not nonnegativeInteger(slots) or slots > 120 then
             return nil, "Bank slot count is unavailable."
         end
-        slotsTotal = slotsTotal + slots
+        result.slotsTotal = result.slotsTotal + slots
+        local totals = collectTotals and {} or nil
         for slot = 1, slots do
             local item = getInfo(tabId, slot)
             if isSecret(item) then return nil, "Bank item is protected by the client." end
@@ -321,13 +333,84 @@ function MclarionWow_ProbeBank()
                     not positiveInteger(count) or count > 2147483647 then
                     return nil, "Bank item value is invalid."
                 end
-                occupied = occupied + 1
-                if not seen[itemId] then seen[itemId] = true; distinct = distinct + 1 end
+                if totals then
+                    local total = (totals[itemId] or 0) + count
+                    if total > 2147483647 then return nil, "Bank item total is too large." end
+                    totals[itemId] = total
+                end
+                result.occupied = result.occupied + 1
+                if not seen[itemId] then
+                    seen[itemId] = true
+                    result.itemIds[#result.itemIds + 1] = itemId
+                    result.distinct = result.distinct + 1
+                end
             end
         end
+        if totals then result.totalsByTab[tabId] = totals end
+    end
+    table.sort(result.itemIds)
+    return result
+end
+
+-- Manual count-only diagnostic for purchased tabs in the character's own viewable bank.
+-- Only aggregate counts leave this function; item IDs, per-item counts and snapshots do not.
+function MclarionWow_ProbeBank()
+    local result, err = scanCharacterBank(false)
+    if not result then
+        if err == "Bank scan is unavailable during combat." then
+            err = "Bank probe is unavailable during combat."
+        end
+        return nil, err
     end
     return string.format("Character bank probe: %d tabs, %d slots, %d occupied, %d distinct items. No bank data saved.",
-        tabCount, slotsTotal, occupied, distinct)
+        result.tabCount, result.slotsTotal, result.occupied, result.distinct)
+end
+
+-- Manual-only export of item totals from purchased tabs in the character's own
+-- currently viewable bank. Nothing from this scan is written to SavedVariables.
+function MclarionWow_BuildBankExport()
+    local result, scanError = scanCharacterBank(true)
+    if not result then
+        if scanError == "Bank scan is unavailable during combat." then
+            scanError = "Bank export is unavailable during combat."
+        end
+        return nil, scanError
+    end
+    local entries = {}
+    for tabId = 6, 14 do
+        local totals = result.totalsByTab[tabId]
+        local itemIds = {}
+        for itemId in pairs(totals or {}) do itemIds[#itemIds + 1] = itemId end
+        table.sort(itemIds)
+        for _, itemId in ipairs(itemIds) do
+            entries[#entries + 1] = string.format("%.0f:%.0f:%.0f", tabId, itemId, totals[itemId])
+            if #entries > 1080 then return nil, "Bank export has too many entries." end
+        end
+    end
+
+    if isSecret(GetServerTime) or isSecret(UnitGUID) or isSecret(GetBuildInfo) or
+        type(GetServerTime) ~= "function" or type(UnitGUID) ~= "function" or
+        type(GetBuildInfo) ~= "function" then
+        return nil, "Bank export metadata is unavailable or protected by the client."
+    end
+    local timestamp, guid = GetServerTime(), UnitGUID("player")
+    local _, buildString = GetBuildInfo()
+    if isSecret(timestamp) or isSecret(guid) or isSecret(buildString) then
+        return nil, "Bank export metadata is protected by the client."
+    end
+    if not positiveInteger(timestamp) or timestamp > 253402300799 or
+        type(guid) ~= "string" or #guid > 80 or not guid:match("^Player%-%d+%-%x+$") or
+        (type(buildString) ~= "string" and type(buildString) ~= "number") then
+        return nil, "Bank export metadata is unavailable."
+    end
+    local build = tonumber(buildString)
+    if not positiveInteger(build) or build > 2147483647 then
+        return nil, "Bank export build is invalid."
+    end
+    local export = table.concat({ "MHWOWK1", "forever", string.format("%.0f", timestamp),
+        guid, table.concat(entries, ","), string.format("%.0f", build) }, "|")
+    if #export > 32768 then return nil, "Bank export is too large." end
+    return export, nil, guid
 end
 
 function MclarionWow_BuildBagExport()
@@ -370,38 +453,26 @@ local function itemText(value, maxBytes)
     end))
 end
 
-function MclarionWow_BuildItemExport()
-    local report, totalsOrError = scanBags(true)
-    if not report then return nil, totalsOrError end
+local function itemMetadataApi(requireInventory)
     if isSecret(C_Item) or type(C_Item) ~= "table" or issecrettable(C_Item) then
         return nil, "Item API is unavailable."
     end
     local getInfo = C_Item.GetItemInfo
-    if isSecret(getInfo) or isSecret(GetInventoryItemID) or isSecret(GetLocale) or
+    if isSecret(getInfo) or (requireInventory and isSecret(GetInventoryItemID)) or isSecret(GetLocale) or
         isSecret(GetServerTime) or isSecret(UnitGUID) or isSecret(GetBuildInfo) then
         return nil, "Item export API is protected by the client."
     end
-    if type(getInfo) ~= "function" or
-        type(GetInventoryItemID) ~= "function" or type(GetLocale) ~= "function" then
+    if type(getInfo) ~= "function" or (requireInventory and type(GetInventoryItemID) ~= "function") or
+        type(GetLocale) ~= "function" or type(GetServerTime) ~= "function" or
+        type(UnitGUID) ~= "function" or type(GetBuildInfo) ~= "function" then
         return nil, "Item API is unavailable."
     end
-    local ids = {}
-    for id in pairs(totalsOrError) do ids[id] = true end
-    for slot = 1, 19 do
-        local id = GetInventoryItemID("player", slot)
-        if isSecret(id) then return nil, "Equipped item is protected by the client." end
-        if id ~= nil then
-            if not positiveInteger(id) or id > 2147483647 then
-                return nil, "Equipped item ID is invalid."
-            end
-            ids[id] = true
-        end
-    end
-    local sorted = {}
-    for id in pairs(ids) do sorted[#sorted + 1] = id end
-    if #sorted > 128 then return nil, "Too many distinct own items for one export." end
-    table.sort(sorted)
+    return getInfo
+end
 
+-- Shared MHWOWI1 serializer. Callers supply a sorted, bounded set of IDs from
+-- their own safe scanner so bag/equipment and bank metadata cannot drift.
+local function buildItemMetadataExport(sorted, getInfo)
     local timestamp, guid, locale = GetServerTime(), UnitGUID("player"), GetLocale()
     local _, buildString = GetBuildInfo()
     if isSecret(timestamp) or isSecret(guid) or isSecret(locale) or isSecret(buildString) then
@@ -460,6 +531,59 @@ function MclarionWow_BuildItemExport()
         guid, string.format("%.0f", build), locale, table.concat(entries, ";") }, "|")
     if #export > 32768 then return nil, "Item export is too large." end
     return export, nil, guid
+end
+
+function MclarionWow_BuildItemExport()
+    local report, totalsOrError = scanBags(true)
+    if not report then return nil, totalsOrError end
+    local getInfo, apiError = itemMetadataApi(true)
+    if not getInfo then return nil, apiError end
+    local ids = {}
+    for id in pairs(totalsOrError) do ids[id] = true end
+    for slot = 1, 19 do
+        local id = GetInventoryItemID("player", slot)
+        if isSecret(id) then return nil, "Equipped item is protected by the client." end
+        if id ~= nil then
+            if not positiveInteger(id) or id > 2147483647 then
+                return nil, "Equipped item ID is invalid."
+            end
+            ids[id] = true
+        end
+    end
+    local sorted = {}
+    for id in pairs(ids) do sorted[#sorted + 1] = id end
+    if #sorted > 128 then return nil, "Too many distinct own items for one export." end
+    table.sort(sorted)
+    return buildItemMetadataExport(sorted, getInfo)
+end
+
+function MclarionWow_BuildBankItemExport(page)
+    if isSecret(page) then return nil, "Bank metadata page is protected by the client." end
+    if page == nil then page = 1 end
+    if not positiveInteger(page) or page > 9 then
+        return nil, "Bank metadata page must be an integer from 1 to 9."
+    end
+    local result, scanError = scanCharacterBank(false)
+    if not result then
+        if scanError == "Bank scan is unavailable during combat." then
+            scanError = "Bank item metadata export is unavailable during combat."
+        end
+        return nil, scanError
+    end
+    local pageSize = 128
+    local pageCount = math.max(1, math.ceil(#result.itemIds / pageSize))
+    if page > pageCount then
+        return nil, string.format("Bank metadata page %d is unavailable; choose 1 to %d.", page, pageCount)
+    end
+    local pageIds = {}
+    local first = (page - 1) * pageSize + 1
+    local last = math.min(#result.itemIds, first + pageSize - 1)
+    for index = first, last do pageIds[#pageIds + 1] = result.itemIds[index] end
+    local getInfo, apiError = itemMetadataApi(false)
+    if not getInfo then return nil, apiError end
+    local export, exportError, guid = buildItemMetadataExport(pageIds, getInfo)
+    if not export then return nil, exportError end
+    return export, nil, guid, page, pageCount
 end
 
 local function storageRoot()
@@ -701,6 +825,61 @@ SlashCmdList.MCLARIONWOWBANKPROBE = function()
     setWindowMode(true)
     exportBox:SetText(ok and (report or "Bank probe unavailable: " .. (err or "unknown error")) or
         "Bank probe unavailable: client refused the scan.")
+    window:Show()
+    exportBox:Show()
+    exportBox:SetFocus()
+    exportBox:HighlightText()
+end
+
+SLASH_MCLARIONWOWBANKSEXPORT1 = "/mhwowbanksexport"
+SlashCmdList.MCLARIONWOWBANKSEXPORT = function()
+    local ok, export, err = pcall(MclarionWow_BuildBankExport)
+    if not window then createWindow() end
+    windowTitle:SetText("MclarionWow — Bank item export (manual only)")
+    windowInstructions:SetText(
+        "Review before copying. No bank item data is saved; press Ctrl+C to copy where you choose.")
+    exportBox:SetText(ok and (export or "Bank export unavailable: " .. (err or "unknown error")) or
+        "Bank export unavailable: client refused the scan.")
+    window:Show()
+    exportBox:Show()
+    exportBox:SetFocus()
+    exportBox:HighlightText()
+end
+
+local function parseBankItemPage(message)
+    if isSecret(message) then return nil, "Bank metadata page is protected by the client." end
+    if message == nil or message == "" or (type(message) == "string" and message:match("^%s*$")) then
+        return 1
+    end
+    if type(message) ~= "string" then return nil, "Bank metadata page is invalid." end
+    local digits = message:match("^%s*(%d+)%s*$")
+    local page = digits and tonumber(digits) or nil
+    if not positiveInteger(page) or page > 9 then
+        return nil, "Bank metadata page must be an integer from 1 to 9."
+    end
+    return page
+end
+
+SLASH_MCLARIONWOWBANKITEMSEXPORT1 = "/mhwowbankitemsexport"
+SlashCmdList.MCLARIONWOWBANKITEMSEXPORT = function(message)
+    if not window then createWindow() end
+    windowTitle:SetText("MclarionWow — Bank item metadata (manual only)")
+    windowInstructions:SetText(
+        "Review MHWOWI1 before copying. Use /mhwowbankitemsexport 2 for the next page when shown.")
+    local page, pageError = parseBankItemPage(message)
+    if not page then
+        exportBox:SetText("Bank item metadata export unavailable: " .. pageError)
+    else
+        local ok, export, err, _, selectedPage, pageCount = pcall(MclarionWow_BuildBankItemExport, page)
+        if ok and export then
+            windowTitle:SetText(string.format(
+                "MclarionWow — Bank item metadata (manual only, page %d/%d)", selectedPage, pageCount))
+            exportBox:SetText(export)
+        else
+            exportBox:SetText("Bank item metadata export unavailable: " ..
+                (ok and (err or "unknown error") or "client refused the scan."))
+        end
+    end
     window:Show()
     exportBox:Show()
     exportBox:SetFocus()
