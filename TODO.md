@@ -29,6 +29,7 @@
 
 ## Release and safety gates
 
+- [ ] Whenever storage, exports, settings, events, importer deployment, or verification changes, update public `DATA_STORAGE.md`, publish the revised addon documentation, then copy it to `B:\MclarionWow-Data-README.md` on Mclarion-Main and verify both files' SHA-256 hashes match. Never include player exports or account identifiers in either copy.
 - [ ] Before each updated in-game addon test, publish the exact audited `.lua` and `.toc` at `https://github.com/Mclarion/MclarionWow` using the repository-scoped write key whose **public** fingerprint is `SHA256:BnO+WXyA2kmjW2DcZOBRusrg9V9rjD5zEUOfGtoDAvg`. Compare anonymous GitHub runtime hashes with the tested package and read back the remote `main` ref. Publish only addon code/docs/tests—no private site/client code, game logs, player exports, SavedVariables, credentials or generated data. Test and install only while WoW is stopped; ask before launching it.
 
 If a live check fails, keep the current backup, reproduce with a non-secret mock, review and test a narrow addon fix, publish the exact audited source, and install only after the game is closed. Do not use player payloads as test fixtures.

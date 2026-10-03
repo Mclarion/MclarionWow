@@ -4,6 +4,8 @@ MclarionWow is a Forever-only, read-only addon for the logged-in character's non
 
 Character snapshots run on login, equipment/zone changes, after combat, and every five minutes once opted in. Version 0.9.0 tries to include the logged-in player's faction, race and gender in a `MHWOW2` snapshot; when the identity APIs are unavailable, automatic capture falls back to the existing gear-only `MHWOW1` format. Bag snapshots run on login, bag opening/changes, after combat, and every five minutes once opted in. When the character-bank view is open, its opening, item changes, and player-selected bank pages check character-bank item-ID/count totals once opted in. Manual commands work independently of these switches: `/mhwow`, `/mhwowidentity` and `/mhwowbagsexport` also save their results to local histories when explicitly invoked; manual bank and metadata exports do not save a history. The addon does not upload data or write arbitrary TXT files; exports are copied only by the player to a destination they choose.
 
+For the exact storage lifecycle, `MclarionWowData` keys, capture triggers, manual-export effects, and Mclarion-Main disk paths, see [DATA_STORAGE.md](DATA_STORAGE.md). Keep its `B:\MclarionWow-Data-README.md` handoff copy synchronized after changes.
+
 ## Use
 
 1. Install the `MclarionWow` directory under the Forever client's `Interface/AddOns` directory **while the client is closed**. The TOC targets interface `16001` and game type `camelot`; installation alone does not prove in-game compatibility.
