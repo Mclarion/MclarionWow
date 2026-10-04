@@ -1,6 +1,6 @@
 # MclarionWow
 
-Forever-only, read-only addon for the logged-in character. **0.11.0 removes manual copy/paste exports** and places a 30px clickable icon at the lower-left edge of the minimap. Click it to open/close the settings/status window; `/mhwowui` remains the keyboard fallback. Published code was installed and its hashes read back while WoW was closed; the minimap control still needs an in-game visual check. Existing SavedVariables and wire formats are preserved.
+Forever-only, read-only addon for the logged-in character. **0.11.0 removes manual copy/paste exports** and places a 30px clickable icon at the lower-left edge of the minimap. Click it to open/close the settings/status window; `/mhwowui` remains the keyboard fallback. Published code was installed and its hashes read back while WoW was closed; the player subsequently confirmed the icon is present and works in game. Existing SavedVariables and wire formats are preserved.
 
 ## Use the game-written file
 
@@ -22,8 +22,8 @@ The player reported a real schema-2 website round trip with bag and bank metadat
 
 ## Local validation
 
-Run from this directory: `(cd tests && lua5.4 test_mclarion_wow.lua)`. The Lua mock suite checks automatic capture, bounds, schema-2 preservation, secret-value refusals, removed commands, and minimap toggling (242 assertions). Paired synthetic schema-2 fixture tests cover implicit and explicit bank arrays; fixtures are fake test data, **not** production account uploads. A game-side minimap placement/click and save/reimport after installing 0.11.0 remain to verify.
+Run from this directory: `(cd tests && lua5.4 test_mclarion_wow.lua)`. The Lua mock suite checks automatic capture, bounds, schema-2 preservation, secret-value refusals, removed commands, and minimap toggling (242 assertions). Paired synthetic schema-2 fixture tests cover implicit and explicit bank arrays; fixtures are fake test data, **not** production account uploads. The player confirmed the 0.11.0 minimap icon is present and clickable in game; post-upgrade save/reimport and visual confirmation of all five settings were not separately reported.
 
 ## Safety and later work
 
-Blizzard may change Forever APIs or secret-value behavior; an interface number and mock tests do not prove game compatibility. Do not inspect a live SavedVariables payload while WoW is running. Unattended external readers or transmission are **not** authorized simply by this addon design and remain policy-gated. Planned next: a supervised in-game icon/UI check, then independently verified, bounded opt-in progression sources (zone, quest/reputation, talent and profession/recipe observations) and separate native-log validation. See `TODO.md`; none of those sources are currently captured.
+Blizzard may change Forever APIs or secret-value behavior; an interface number and mock tests do not prove every game behavior. Do not inspect a live SavedVariables payload while WoW is running. Unattended external readers or transmission are **not** authorized simply by this addon design and remain policy-gated. Planned next: independently verified, bounded opt-in progression sources (zone, quest/reputation, talent and profession/recipe observations) and separate native-log validation. See `TODO.md`; none of those sources are currently captured.

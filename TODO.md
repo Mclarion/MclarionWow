@@ -1,13 +1,14 @@
 # MclarionWow handoff TODO — 2026-10-04
 
-**0.11.0 installed:** the user confirmed an updated game-written file fixed the affected client's missing item metadata and completed the one-file save/import checks. Manual text-copy exports are removed; a clickable icon near the minimap toggles `/mhwowui`. Automatic builders, five opt-ins, saved histories, schema-2 item metadata and count-only chat probes remain. Mock tests pass 242 assertions. Published code `1acd68f` was installed while WoW was stopped and a separate readback verified version/hash and backup; game-side icon placement/click still needs checking. Historical 0.10.x notes below are not current instructions.
+**0.11.0 installed:** the user confirmed an updated game-written file fixed the affected client's missing item metadata and completed the one-file save/import checks. Manual text-copy exports are removed; a clickable icon near the minimap toggles `/mhwowui`. Automatic builders, five opt-ins, saved histories, schema-2 item metadata and count-only chat probes remain. Mock tests pass 242 assertions. Published code `1acd68f` was installed while WoW was stopped and a separate readback verified version/hash and backup; the player has now confirmed the icon is present and works in game. Historical 0.10.x notes below are not current instructions.
 
 ## Immediate release checks
 
 - [x] Remove manual export buttons, copy popup and six copy slash commands; retain versioned builders for automatic SavedVariables capture and test history bounds/secret-value refusals.
 - [x] Add a minimap-adjacent click target that toggles the settings/status panel; keep `/mhwowui` when the minimap is unavailable.
 - [x] Run Lua syntax, fixture and mock tests; publish audited code, install while WoW is stopped with a recoverable backup and read back matching installed hashes. Publish the updated handoff and verify its B: mirror separately.
-- [ ] **Need player in game:** visually confirm minimap icon placement, click once to open and once to close settings; confirm no copy buttons and existing five settings retained. If the game's minimap/frame APIs differ from mocks, fix narrowly and re-release.
+- [x] Player confirmed the minimap icon is present and works in game.
+- [ ] Five retained settings, absence of copy buttons, and a post-0.11.0 save/reimport were not separately reported; do not claim those checks from the icon report alone.
 
 ## Next progression work (not shipped)
 
