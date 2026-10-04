@@ -1,4 +1,3 @@
--- SYNTHETIC TEST DATA ONLY. Not a player save or a live-import result.
 MclarionWowData = {
     ["schema"] = 2,
     ["settings"] = {
