@@ -590,7 +590,7 @@ local function buildItemMetadataExport(sorted, getInfo)
     local export = table.concat({ "MHWOWI1", "forever", string.format("%.0f", timestamp),
         guid, string.format("%.0f", build), locale, table.concat(entries, ";") }, "|")
     if #export > 32768 then return nil, "Item export is too large." end
-    return export, nil, guid
+    return export, nil, guid, #entries, #sorted
 end
 
 function MclarionWow_BuildItemExport()
@@ -641,9 +641,9 @@ function MclarionWow_BuildBankItemExport(page)
     for index = first, last do pageIds[#pageIds + 1] = result.itemIds[index] end
     local getInfo, apiError = itemMetadataApi(false)
     if not getInfo then return nil, apiError end
-    local export, exportError, guid = buildItemMetadataExport(pageIds, getInfo)
+    local export, exportError, guid, resolved, observed = buildItemMetadataExport(pageIds, getInfo)
     if not export then return nil, exportError end
-    return export, nil, guid, page, pageCount
+    return export, nil, guid, page, pageCount, resolved, observed
 end
 
 local function storageRoot()
@@ -665,7 +665,7 @@ local function storageRoot()
     if isSecret(schema) then
         return nil, "Saved data schema is protected by the client; it was not overwritten."
     end
-    if schema ~= 1 then
+    if schema ~= 1 and schema ~= 2 then
         return nil, "Saved data has an unsupported format; it was not overwritten."
     end
     local characters = data.characters
@@ -674,6 +674,10 @@ local function storageRoot()
     end
     if type(characters) ~= "table" then
         return nil, "Saved data has an unsupported format; it was not overwritten."
+    end
+    if schema == 2 and (isSecret(data.items) or type(data.items) ~= "table" or
+        issecrettable(data.items)) then
+        return nil, "Saved item details have an unsupported format; they were not overwritten."
     end
     return data, nil, characters
 end
@@ -692,11 +696,13 @@ local function settingsRoot()
     end
     if type(settings) ~= "table" or isSecret(settings.autoCombatLog) or
         isSecret(settings.autoCharacterCapture) or isSecret(settings.autoBagCapture) or
-        isSecret(settings.autoBankCapture) or
+        isSecret(settings.autoBankCapture) or isSecret(settings.autoItemMetadataCapture) or
         type(settings.autoCombatLog) ~= "boolean" or
         type(settings.autoBagCapture) ~= "boolean" or
         (settings.autoCharacterCapture ~= nil and type(settings.autoCharacterCapture) ~= "boolean") or
-        (settings.autoBankCapture ~= nil and type(settings.autoBankCapture) ~= "boolean") then
+        (settings.autoBankCapture ~= nil and type(settings.autoBankCapture) ~= "boolean") or
+        (settings.autoItemMetadataCapture ~= nil and
+            type(settings.autoItemMetadataCapture) ~= "boolean") then
         return nil, "Addon settings have an unsupported format; they were not overwritten."
     end
     if settings.autoCharacterCapture == nil then settings.autoCharacterCapture = false end
@@ -833,19 +839,156 @@ local function saveBankSnapshot(guid, export)
     return true
 end
 
+-- One latest copy per source; older numeric histories remain unchanged.
+local function validItemPayload(value, guid)
+    if isSecret(value) or type(value) ~= "string" or #value > 32768 then return false end
+    local stamp, owner, build, locale, entries =
+        value:match("^MHWOWI1|forever|(%d+)|([^|]+)|(%d+)|([^|]+)|([^|]+)$")
+    if owner ~= guid or not positiveInteger(tonumber(stamp)) or
+        tonumber(stamp) > 253402300799 or not positiveInteger(tonumber(build)) or
+        tonumber(build) > 2147483647 or
+        not locale:match("^[a-z][a-z][A-Z][A-Z]$") or
+        entries:sub(1, 1) == ";" or entries:sub(-1) == ";" or
+        entries:find(";;", 1, true) then return false end
+    local function number(text, optional)
+        if optional and text == "" then return true end
+        return text:match("^%d+$") ~= nil and tonumber(text) <= 2147483647
+    end
+    local function hex(text, maxBytes, required)
+        return (not required or text ~= "") and #text <= maxBytes * 2 and
+            #text % 2 == 0 and text:match("^[0-9A-F]*$") ~= nil
+    end
+    local count, previousId = 0, 0
+    for entry in entries:gmatch("[^;]+") do
+        count = count + 1
+        if count > 128 then return false end
+        local fields = {}
+        for field in (entry .. ":"):gmatch("(.-):") do
+            fields[#fields + 1] = field
+            if #fields > 19 then return false end
+        end
+        local id = tonumber(fields[1])
+        if #fields ~= 19 or not number(fields[1]) or not id or id <= previousId or
+            not hex(fields[2], 160, true) or not hex(fields[3], 512) or
+            not hex(fields[7], 160) or not hex(fields[8], 160) or
+            not hex(fields[10], 64) or not hex(fields[19], 512) or
+            fields[18] ~= "0" and fields[18] ~= "1" then return false end
+        for _, index in ipairs({ 4, 5, 6, 9, 11, 12, 13, 14, 15, 16, 17 }) do
+            if not number(fields[index], index == 17) then return false end
+        end
+        previousId = id
+    end
+    return count > 0
+end
+
+local function saveItemMetadata(guid, source, payload)
+    local data, err = storageRoot()
+    if not data then return nil, err end
+    if isSecret(guid) or type(guid) ~= "string" or #guid > 77 or
+        not guid:match("^Player%-[A-Za-z0-9%-]+$") then
+        return nil, "Item details have an invalid character ID."
+    end
+    local items = data.items
+    if data.schema == 1 then
+        if items ~= nil then return nil, "Old storage has unexpected item details." end
+        items = {}
+    end
+    local current = items[guid]
+    if isSecret(current) or (type(current) == "table" and issecrettable(current)) or
+        (current ~= nil and type(current) ~= "table") then
+        return nil, "Saved item details are protected or malformed."
+    end
+    local updated = { bags = current and current.bags or nil,
+        bank = current and current.bank or nil }
+    updated[source] = payload
+    local bytes, records = 0, 0
+    for owner, record in pairs(items) do
+        if isSecret(owner) or isSecret(record) or type(owner) ~= "string" or
+            #owner > 77 or not owner:match("^Player%-[A-Za-z0-9%-]+$") or
+            type(record) ~= "table" or issecrettable(record) then
+            return nil, "Saved item details are protected or malformed."
+        end
+        records = records + 1
+    end
+    if not current then records = records + 1 end
+    if records > 256 then return nil, "Item detail record limit reached." end
+    local function checkRecord(owner, record)
+        local fields = 0
+        for key, value in pairs(record) do
+            if isSecret(key) or isSecret(value) or
+                (key ~= "bags" and key ~= "bank") then
+                return false
+            end
+            fields = fields + 1
+            if key == "bags" then
+                if not validItemPayload(value, owner) then return false end
+                bytes = bytes + #value
+            else
+                if type(value) ~= "table" or issecrettable(value) then return false end
+                local count = 0
+                for page, text in pairs(value) do
+                    if isSecret(page) or type(page) ~= "number" or page < 1 or
+                        page > 9 or page ~= math.floor(page) or
+                        not validItemPayload(text, owner) then return false end
+                    count = count + 1
+                    bytes = bytes + #text
+                end
+                if count == 0 or count ~= #value then return false end
+            end
+            if bytes > 1048576 then return false end
+        end
+        return fields > 0
+    end
+    if current and not checkRecord(guid, current) then
+        return nil, "Saved item details exceed the limit or are malformed."
+    end
+    bytes = 0 -- The replacement is charged only once, after validating the old record.
+    for owner, record in pairs(items) do
+        if owner ~= guid and not checkRecord(owner, record) then
+            return nil, "Saved item details exceed the limit or are malformed."
+        end
+    end
+    if not checkRecord(guid, updated) then
+        return nil, "Item details exceed the limit or are malformed."
+    end
+    local function sameDetails(old, new)
+        if not old or not new then return old == new end
+        local prior = old:match("^MHWOWI1|forever|%d+|(.*)$")
+        local nextValue = new:match("^MHWOWI1|forever|%d+|(.*)$")
+        return prior ~= nil and prior == nextValue
+    end
+    local unchanged = source == "bags" and sameDetails(current and current.bags, payload)
+    if source == "bank" and current and current.bank then
+        unchanged = #current.bank == #payload
+        for page = 1, #payload do
+            if not sameDetails(current.bank[page], payload[page]) then unchanged = false end
+        end
+    end
+    if unchanged then return true end
+    -- Only mutate after validating every existing record and the full new payload.
+    items[guid] = updated
+    if data.schema == 1 then
+        data.items = items
+        data.schema = 2
+    end
+    return true
+end
+
 local window
 local exportBox, windowTitle, windowInstructions
 local displayedExport
-local settingsWindow, combatStatusLabel, bagStatusLabel, bankStatusLabel, exportStatusLabel
+local settingsWindow, combatStatusLabel, bagStatusLabel, bankStatusLabel, itemStatusLabel, exportStatusLabel
 local combatMessage = "Waiting for the next login."
 local bagMessage = "No bag capture this session."
 local bankMessage = "No own-bank capture this session."
+local itemMessage = "Off; enable item details to capture cached names."
 local exportMessage = "No copy window opened this session."
 
 local function refreshSettingsStatus()
     if combatStatusLabel then combatStatusLabel:SetText("Combat log: " .. combatMessage) end
     if bagStatusLabel then bagStatusLabel:SetText("Bags: " .. bagMessage) end
     if bankStatusLabel then bankStatusLabel:SetText("Bank: " .. bankMessage) end
+    if itemStatusLabel then itemStatusLabel:SetText("Items: " .. itemMessage) end
     if exportStatusLabel then exportStatusLabel:SetText("Export: " .. exportMessage) end
 end
 
@@ -892,7 +1035,7 @@ end
 
 local function createSettingsWindow()
     settingsWindow = CreateFrame("Frame", "MclarionWowSettingsFrame", UIParent, "BasicFrameTemplateWithInset")
-    settingsWindow:SetSize(490, 430)
+    settingsWindow:SetSize(490, 480)
     settingsWindow:SetPoint("CENTER")
     settingsWindow:SetFrameStrata("DIALOG")
     settingsWindow:SetMovable(true)
@@ -920,6 +1063,11 @@ local function createSettingsWindow()
             local current = settingsRoot()
             if not current then self:SetChecked(false); return end
             current[key] = self:GetChecked() == true
+            if key == "autoItemMetadataCapture" then
+                itemMessage = current[key] and "Waiting for a bag/equipment or own-bank scan." or
+                    "Off; enable item details to capture cached names."
+                refreshSettingsStatus()
+            end
             if key == "autoCombatLog" then
                 if current[key] then
                     combatMessage = "Will auto-start on next world entry."
@@ -935,21 +1083,24 @@ local function createSettingsWindow()
     checkbox("Capture own character state, out of combat", -98, "autoCharacterCapture")
     checkbox("Capture own bag changes, out of combat", -129, "autoBagCapture")
     checkbox("Capture own bank while open, out of combat", -160, "autoBankCapture")
+    checkbox("Capture own item details (cached names only)", -191, "autoItemMetadataCapture")
 
     combatStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    combatStatusLabel:SetPoint("TOPLEFT", 18, -200)
+    combatStatusLabel:SetPoint("TOPLEFT", 18, -231)
     bagStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    bagStatusLabel:SetPoint("TOPLEFT", 18, -222)
+    bagStatusLabel:SetPoint("TOPLEFT", 18, -253)
     bankStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    bankStatusLabel:SetPoint("TOPLEFT", 18, -244)
+    bankStatusLabel:SetPoint("TOPLEFT", 18, -275)
+    itemStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    itemStatusLabel:SetPoint("TOPLEFT", 18, -297)
     exportStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    exportStatusLabel:SetPoint("TOPLEFT", 18, -266)
+    exportStatusLabel:SetPoint("TOPLEFT", 18, -319)
     refreshSettingsStatus()
 
     local function exportButton(label, x, callback)
         local button = CreateFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
         button:SetSize(140, 25)
-        button:SetPoint("TOPLEFT", x, -297)
+        button:SetPoint("TOPLEFT", x, -350)
         button:SetText(label)
         button:SetScript("OnClick", callback)
     end
@@ -958,7 +1109,7 @@ local function createSettingsWindow()
     exportButton("Bank (manual)", 322, function() SlashCmdList.MCLARIONWOWBANKSEXPORT() end)
     local stopButton = CreateFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
     stopButton:SetSize(175, 25)
-    stopButton:SetPoint("TOPLEFT", 18, -329)
+    stopButton:SetPoint("TOPLEFT", 18, -382)
     stopButton:SetText("Stop logging now")
     stopButton:SetScript("OnClick", function()
         local current = settingsRoot()
@@ -972,11 +1123,11 @@ local function createSettingsWindow()
         stopLoggingNow()
     end)
     local footer = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    footer:SetPoint("TOPLEFT", 18, -367)
+    footer:SetPoint("TOPLEFT", 18, -420)
     footer:SetText("Stop logging now may end logging started outside this addon.")
     local saveNote = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    saveNote:SetPoint("TOPLEFT", 18, -389)
-    saveNote:SetText("Bank names need manual export. WoW controls disk writes.")
+    saveNote:SetPoint("TOPLEFT", 18, -442)
+    saveNote:SetText("Item details save after opt-in; WoW controls disk writes.")
     settingsWindow:Hide()
 end
 
@@ -1295,6 +1446,47 @@ local function captureBankLocally()
     refreshSettingsStatus()
 end
 
+local function captureItemDetailsLocally(source)
+    if not inWorld then return end
+    local settings = settingsRoot()
+    if not settings or not settings.autoItemMetadataCapture then return end
+    local combat = combatStatus()
+    if combat == nil or combat then return end
+    local ok, export, _, guid, _, pageCount, resolved, observed
+    local payload
+    if source == "bank" then
+        ok, export, _, guid, _, pageCount, resolved, observed =
+            pcall(MclarionWow_BuildBankItemExport, 1)
+        if ok and export and not isSecret(pageCount) and type(pageCount) == "number" and
+            pageCount >= 1 and pageCount <= 9 and pageCount == math.floor(pageCount) and
+            not isSecret(resolved) and not isSecret(observed) and resolved == observed then
+            payload = { export }
+            for page = 2, pageCount do
+                local pageOk, text, _, pageGuid, actualPage, totalPages, cached, seen =
+                    pcall(MclarionWow_BuildBankItemExport, page)
+                if not pageOk or not text or pageGuid ~= guid or actualPage ~= page or
+                    totalPages ~= pageCount or isSecret(cached) or isSecret(seen) or
+                    cached ~= seen then payload = nil; break end
+                payload[page] = text
+            end
+        end
+    else
+        ok, export, _, guid, resolved, observed = pcall(MclarionWow_BuildItemExport)
+        if ok and export and not isSecret(resolved) and not isSecret(observed) and
+            resolved == observed then payload = export end
+    end
+    if payload and guid then
+        local saved, stored, storageError = pcall(saveItemMetadata, guid, source, payload)
+        itemMessage = saved and stored and
+            "Captured in memory; disk update waits for logout or /reload." or
+            "Capture unavailable: " .. (saved and (storageError or "local storage refused") or
+                "client refused local storage") .. "."
+    else
+        itemMessage = "Capture unavailable: no complete cached item scan."
+    end
+    refreshSettingsStatus()
+end
+
 for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "PLAYER_EQUIPMENT_CHANGED",
     "ZONE_CHANGED_NEW_AREA", "PLAYER_REGEN_ENABLED", "BAG_UPDATE_DELAYED", "BAG_OPEN",
     "BANKFRAME_OPENED", "PLAYERBANKSLOTS_CHANGED", "BANK_TABS_CHANGED" }) do
@@ -1314,8 +1506,17 @@ local function onEvent(_, event, bagID)
         bagID == math.floor(bagID) and bagID >= 0 and bagID <= 4) then
         pcall(captureBagsLocally)
     end
+    if event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_EQUIPMENT_CHANGED" or
+        event == "PLAYER_REGEN_ENABLED" or event == "BAG_UPDATE_DELAYED" or
+        (event == "BAG_OPEN" and not isSecret(bagID) and type(bagID) == "number" and
+            bagID == math.floor(bagID) and bagID >= 0 and bagID <= 4) then
+        pcall(captureItemDetailsLocally, "bags")
+    end
     if event == "BANKFRAME_OPENED" or event == "PLAYERBANKSLOTS_CHANGED" or
-        event == "BANK_TABS_CHANGED" then pcall(captureBankLocally) end
+        event == "BANK_TABS_CHANGED" then
+        pcall(captureBankLocally)
+        pcall(captureItemDetailsLocally, "bank")
+    end
 end
 captureFrame:SetScript("OnEvent", function(...) pcall(onEvent, ...) end)
 if not isSecret(EventRegistry) and type(EventRegistry) == "table" and
@@ -1323,7 +1524,10 @@ if not isSecret(EventRegistry) and type(EventRegistry) == "table" and
     not isSecret(EventRegistry.RegisterCallback) and
     type(EventRegistry.RegisterCallback) == "function" then
     pcall(EventRegistry.RegisterCallback, EventRegistry,
-        "BankPanelMixin.PageSelected", function() pcall(captureBankLocally) end, captureFrame)
+        "BankPanelMixin.PageSelected", function()
+            pcall(captureBankLocally)
+            pcall(captureItemDetailsLocally, "bank")
+        end, captureFrame)
 end
 local function onUpdate(_, delta)
     elapsed = elapsed + delta
@@ -1331,6 +1535,7 @@ local function onUpdate(_, delta)
         elapsed = 0
         pcall(captureLocally)
         pcall(captureBagsLocally)
+        pcall(captureItemDetailsLocally, "bags")
     end
 end
 captureFrame:SetScript("OnUpdate", function(...) pcall(onUpdate, ...) end)

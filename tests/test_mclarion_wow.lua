@@ -1482,8 +1482,8 @@ if type(SlashCmdList.MCLARIONWOWUI) == "function" then
             checkboxes[#checkboxes + 1] = frame
         end
     end
-    expectEqual(#checkboxes, 4, "settings expose logging, character, bag and bank switches")
-    if #checkboxes == 4 then
+    expectEqual(#checkboxes, 5, "settings expose logging, character, bag, bank and item switches")
+    if #checkboxes == 5 then
         checkboxes[1]:SetChecked(false)
         checkboxes[1].scripts.OnClick(checkboxes[1])
         expectEqual(settings.autoCombatLog, false, "logging preference persists in saved variables")
@@ -1626,6 +1626,153 @@ gear[1] = gear[1] + 1
 latestCapture.scripts.OnEvent(latestCapture, "PLAYER_EQUIPMENT_CHANGED")
 expectTrue(#identityHistory == 3 and identityHistory[3]:find("^MHWOW2|forever|") ~= nil,
     "automatic opt-in capture resumes MHWOW2 when identity APIs are available")
+
+-- Candidate schema-2 SavedVariables flow (not installed until the website reads both schemas).
+local itemGuid = "Player-1234-ABCDEF12"
+local originalMetadataInfo = C_Item.GetItemInfo
+C_Item.GetItemInfo = function(id)
+    if id == 4242 then return originalMetadataInfo(id) end
+    return "Cached " .. id, "link" .. id, 1, 1, 1, "Misc", "Other", 1,
+        "", id, 0, 15, 0, 0, 0, nil, false, ""
+end
+MclarionWowData = { schema = 1, characters = {}, settings = {
+    autoCombatLog = false, autoCharacterCapture = false,
+    autoBagCapture = false, autoBankCapture = false } }
+chunk("MclarionWow", {})
+local itemFrame
+for _, frame in ipairs(frames) do
+    if frame.events and frame.events.BANKFRAME_OPENED then itemFrame = frame end
+end
+itemFrame.scripts.OnEvent(itemFrame, "PLAYER_ENTERING_WORLD")
+expectEqual(MclarionWowData.schema, 1, "new item metadata capture defaults off without migrating schema")
+expectEqual(MclarionWowData.items, nil, "no item metadata is saved without explicit opt-in")
+SlashCmdList.MCLARIONWOWUI()
+local itemPanel, itemToggle
+for _, frame in ipairs(frames) do
+    if frame.name == "MclarionWowSettingsFrame" then itemPanel = frame end
+end
+local itemCheckboxes = {}
+for _, frame in ipairs(frames) do
+    if frame.parent == itemPanel and frame.frameType == "CheckButton" then
+        itemCheckboxes[#itemCheckboxes + 1] = frame
+    end
+end
+itemToggle = itemCheckboxes[5]
+expectTrue(itemToggle ~= nil and itemToggle:GetChecked() == false,
+    "separate item-details consent is exposed and defaults off")
+if itemToggle then
+    itemToggle:SetChecked(true)
+    itemToggle.scripts.OnClick(itemToggle)
+end
+expectEqual(MclarionWowData.settings.autoItemMetadataCapture, true,
+    "item-details opt-in persists in SavedVariables")
+itemFrame.scripts.OnEvent(itemFrame, "BAG_UPDATE_DELAYED")
+local itemRecord = MclarionWowData.items and MclarionWowData.items[itemGuid]
+expectTrue(MclarionWowData.schema == 2 and itemRecord and
+    itemRecord.bags and
+    itemRecord.bags:find("4242:C38970C3A9657C427269676874:", 1, true) ~= nil,
+    "opted-in bag/equipment details migrate schema and save encoded MHWOWI1")
+local bagPayload = itemRecord and itemRecord.bags
+now = now + 1
+itemFrame.scripts.OnEvent(itemFrame, "BAG_UPDATE_DELAYED")
+expectEqual(itemRecord and itemRecord.bags, bagPayload,
+    "unchanged item details deduplicate despite a new timestamp")
+local oldItemSlots, oldItemContainer = C_Container.GetContainerNumSlots, C_Container.GetContainerItemInfo
+C_Container.GetContainerNumSlots = function(bag)
+    if bag == 6 then return 1 end
+    return oldItemSlots(bag)
+end
+C_Container.GetContainerItemInfo = function(bag, slot)
+    if bag == 6 and slot == 1 then return { itemID = 4242, stackCount = 1 } end
+    return oldItemContainer(bag, slot)
+end
+itemFrame.scripts.OnEvent(itemFrame, "BANKFRAME_OPENED")
+itemRecord = MclarionWowData.items[itemGuid]
+expectTrue(itemRecord and type(itemRecord.bank) == "table" and
+    type(itemRecord.bank[1]) == "string" and itemRecord.bank[1]:find("4242:", 1, true) ~= nil,
+    "visible own-bank metadata is stored as bounded bank pages")
+local beforeFailedBank = itemRecord and itemRecord.bank
+local oldBankView = C_Bank.CanViewBank
+C_Bank.CanViewBank = function() return false end
+itemFrame.scripts.OnEvent(itemFrame, "BANKFRAME_OPENED")
+expectEqual(itemRecord and itemRecord.bank, beforeFailedBank,
+    "refused own-bank view leaves previous metadata unchanged")
+C_Bank.CanViewBank = oldBankView
+local oldPurchasedTabs = C_Bank.FetchPurchasedBankTabData
+C_Bank.FetchPurchasedBankTabData = function() return { { ID = 6 }, { ID = 7 } } end
+C_Container.GetContainerNumSlots = function(tab) return tab == 6 and 120 or 9 end
+C_Container.GetContainerItemInfo = function(tab, slot)
+    return { itemID = tab == 6 and slot or 120 + slot, stackCount = 1 }
+end
+itemFrame.scripts.OnEvent(itemFrame, "BANKFRAME_OPENED")
+local twoPages = MclarionWowData.items[itemGuid].bank
+expectTrue(#twoPages == 2 and twoPages[2]:find("129:", 1, true) ~= nil,
+    "all observed own-bank IDs are stored in two bounded metadata pages")
+local cachedForPages = C_Item.GetItemInfo
+C_Item.GetItemInfo = function(id)
+    if id == 129 then return nil end
+    return cachedForPages(id)
+end
+itemFrame.scripts.OnEvent(itemFrame, "BANKFRAME_OPENED")
+expectEqual(MclarionWowData.items[itemGuid].bank, twoPages,
+    "a partially uncached later bank page does not replace the complete set")
+C_Item.GetItemInfo = cachedForPages
+C_Container.GetContainerNumSlots = function(tab) return tab == 6 and 1 or 0 end
+C_Container.GetContainerItemInfo = function(tab, slot)
+    if tab == 6 and slot == 1 then return { itemID = 4242, stackCount = 1 } end
+end
+itemFrame.scripts.OnEvent(itemFrame, "BANKFRAME_OPENED")
+expectTrue(#MclarionWowData.items[itemGuid].bank == 1 and
+    MclarionWowData.items[itemGuid].bank[2] == nil,
+    "successful smaller own-bank scan removes stale metadata pages")
+C_Bank.FetchPurchasedBankTabData = oldPurchasedTabs
+C_Container.GetContainerNumSlots, C_Container.GetContainerItemInfo = oldItemSlots, oldItemContainer
+local oldItemInfo = C_Item.GetItemInfo
+C_Item.GetItemInfo = function(id)
+    if id == 4242 then return nil end
+    return oldItemInfo(id)
+end
+itemFrame.scripts.OnEvent(itemFrame, "BAG_UPDATE_DELAYED")
+expectEqual(MclarionWowData.items[itemGuid].bags, bagPayload,
+    "partially uncached names do not erase previously saved item details")
+C_Item.GetItemInfo = oldItemInfo
+chunk("MclarionWow", {})
+local reloadedItems
+for _, frame in ipairs(frames) do
+    if frame.events and frame.events.BANKFRAME_OPENED then reloadedItems = frame end
+end
+reloadedItems.scripts.OnEvent(reloadedItems, "PLAYER_ENTERING_WORLD")
+expectTrue(MclarionWowData.schema == 2 and MclarionWowData.items[itemGuid].bags == bagPayload and
+    MclarionWowData.settings.autoItemMetadataCapture == true,
+    "schema-2 item records and consent survive a simulated UI reload")
+local intact = MclarionWowData.items[itemGuid]
+local badWire = { bags = "MHWOWI1|forever|1720000000|" .. itemGuid ..
+    "|70170|enUS|not-an-item", bank = intact.bank }
+MclarionWowData.items[itemGuid] = badWire
+reloadedItems.scripts.OnEvent(reloadedItems, "BAG_UPDATE_DELAYED")
+expectEqual(MclarionWowData.items[itemGuid], badWire,
+    "malformed existing item wire records refuse replacement")
+MclarionWowData.items[itemGuid] = intact
+MclarionWowData.items[itemGuid] = { bags = intact.bags, bank = intact.bank,
+    unsupported = "must not silently disappear" }
+local malformed = MclarionWowData.items[itemGuid]
+reloadedItems.scripts.OnEvent(reloadedItems, "BAG_UPDATE_DELAYED")
+expectEqual(MclarionWowData.items[itemGuid], malformed,
+    "unknown existing item fields fail closed without overwriting the saved record")
+MclarionWowData.items[itemGuid] = intact
+local protectedItemRecord = protectedSentinel()
+secretValues[protectedItemRecord] = true
+MclarionWowData.items[itemGuid] = protectedItemRecord
+reloadedItems.scripts.OnEvent(reloadedItems, "BAG_UPDATE_DELAYED")
+expectEqual(MclarionWowData.items[itemGuid], protectedItemRecord,
+    "protected item records are never overwritten")
+secretValues[protectedItemRecord] = nil
+MclarionWowData.items[itemGuid] = intact
+C_Item.GetItemInfo = function() return nil end
+reloadedItems.scripts.OnEvent(reloadedItems, "BAG_UPDATE_DELAYED")
+expectEqual(MclarionWowData.items[itemGuid], intact,
+    "uncached item metadata leaves a valid schema-2 record untouched")
+C_Item.GetItemInfo = originalMetadataInfo
 
 if failures > 0 then
     io.stderr:write(string.format("\n%d/%d assertions failed\n", failures, tests))
