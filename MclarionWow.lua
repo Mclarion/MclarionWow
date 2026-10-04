@@ -974,13 +974,16 @@ local function saveItemMetadata(guid, source, payload)
     return true
 end
 
-local settingsWindow, combatStatusLabel, bagStatusLabel, bankStatusLabel, itemStatusLabel
+local settingsWindow, characterStatusLabel, combatStatusLabel, bagStatusLabel, bankStatusLabel, itemStatusLabel
+local captureNow
+local characterMessage = "No character scan this session."
 local combatMessage = "Waiting for the next login."
 local bagMessage = "No bag capture this session."
 local bankMessage = "No own-bank capture this session."
 local itemMessage = "Off; enable item details to capture cached names."
 
 local function refreshSettingsStatus()
+    if characterStatusLabel then characterStatusLabel:SetText("Character: " .. characterMessage) end
     if combatStatusLabel then combatStatusLabel:SetText("Combat log: " .. combatMessage) end
     if bagStatusLabel then bagStatusLabel:SetText("Bags: " .. bagMessage) end
     if bankStatusLabel then bankStatusLabel:SetText("Bank: " .. bankMessage) end
@@ -1023,7 +1026,7 @@ end
 
 local function createSettingsWindow()
     settingsWindow = CreateFrame("Frame", "MclarionWowSettingsFrame", UIParent, "BasicFrameTemplateWithInset")
-    settingsWindow:SetSize(490, 430)
+    settingsWindow:SetSize(490, 490)
     settingsWindow:SetPoint("CENTER")
     settingsWindow:SetFrameStrata("DIALOG")
     settingsWindow:SetMovable(true)
@@ -1036,8 +1039,11 @@ local function createSettingsWindow()
     title:SetPoint("TOPLEFT", 18, -10)
     title:SetText("Vaultkeeper companion")
     local note = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    note:SetPoint("TOPLEFT", 18, -42)
-    note:SetText("Snapshots remain in memory until WoW saves them on logout or /reload.")
+    note:SetPoint("TOPLEFT", 18, -37)
+    note:SetText("Auto-capture works with this window closed; loot and bag changes scan.")
+    local bankNote = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    bankNote:SetPoint("TOPLEFT", 18, -55)
+    bankNote:SetText("Open your character-bank tab for bank scans; /reload saves to disk.")
 
     local function checkbox(label, y, key)
         local button = CreateFrame("CheckButton", nil, settingsWindow, "UICheckButtonTemplate")
@@ -1067,24 +1073,45 @@ local function createSettingsWindow()
         end)
         return button
     end
-    local combatCheckbox = checkbox("Enable WoW combat logging at login", -67, "autoCombatLog")
-    checkbox("Capture own character state, out of combat", -98, "autoCharacterCapture")
-    checkbox("Capture own bag changes, out of combat", -129, "autoBagCapture")
-    checkbox("Capture own bank while open, out of combat", -160, "autoBankCapture")
-    checkbox("Capture own item details (cached names only)", -191, "autoItemMetadataCapture")
+    local combatCheckbox = checkbox("Enable WoW combat logging at login", -87, "autoCombatLog")
+    checkbox("Capture own character state, out of combat", -118, "autoCharacterCapture")
+    checkbox("Capture own bag changes, out of combat", -149, "autoBagCapture")
+    checkbox("Capture own bank while open, out of combat", -180, "autoBankCapture")
+    checkbox("Capture own item details (cached names only)", -211, "autoItemMetadataCapture")
 
+    characterStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    characterStatusLabel:SetPoint("TOPLEFT", 18, -245)
     combatStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    combatStatusLabel:SetPoint("TOPLEFT", 18, -231)
+    combatStatusLabel:SetPoint("TOPLEFT", 18, -267)
     bagStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    bagStatusLabel:SetPoint("TOPLEFT", 18, -253)
+    bagStatusLabel:SetPoint("TOPLEFT", 18, -289)
     bankStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    bankStatusLabel:SetPoint("TOPLEFT", 18, -275)
+    bankStatusLabel:SetPoint("TOPLEFT", 18, -311)
     itemStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    itemStatusLabel:SetPoint("TOPLEFT", 18, -297)
+    itemStatusLabel:SetPoint("TOPLEFT", 18, -333)
     refreshSettingsStatus()
+    for index, entry in ipairs({ { "Character now", "character" }, { "Bags now", "bags" },
+        { "Bank now", "bank" }, { "Items now", "items" } }) do
+        local button = CreateFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
+        button:SetSize(110, 25)
+        button:SetPoint("TOPLEFT", 18 + (index - 1) * 117, -365)
+        button:SetText(entry[1])
+        button:SetScript("OnClick", function()
+            if not captureNow then return end
+            local ok = pcall(captureNow, entry[2])
+            if not ok then
+                local message = "Capture unavailable: client refused requested scan."
+                if entry[2] == "character" then characterMessage = message
+                elseif entry[2] == "bags" then bagMessage = message
+                elseif entry[2] == "bank" then bankMessage = message
+                else itemMessage = message end
+                refreshSettingsStatus()
+            end
+        end)
+    end
     local stopButton = CreateFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
     stopButton:SetSize(175, 25)
-    stopButton:SetPoint("TOPLEFT", 18, -335)
+    stopButton:SetPoint("TOPLEFT", 18, -400)
     stopButton:SetText("Stop logging now")
     stopButton:SetScript("OnClick", function()
         local current = settingsRoot()
@@ -1098,11 +1125,11 @@ local function createSettingsWindow()
         stopLoggingNow()
     end)
     local footer = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    footer:SetPoint("TOPLEFT", 18, -375)
+    footer:SetPoint("TOPLEFT", 18, -437)
     footer:SetText("Stop logging now may end logging started outside this addon.")
     local saveNote = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    saveNote:SetPoint("TOPLEFT", 18, -397)
-    saveNote:SetText("Item details save after opt-in; WoW controls disk writes.")
+    saveNote:SetPoint("TOPLEFT", 18, -459)
+    saveNote:SetText("Items now: bags + gear; Bank now: bank items if enabled.")
     settingsWindow:Hide()
 end
 
@@ -1186,8 +1213,14 @@ local function captureLocally()
         ok, export, _, guid = pcall(MclarionWow_BuildExport)
     end
     if ok and export and guid then
-        pcall(saveSnapshot, guid, export)
+        local saved, stored = pcall(saveSnapshot, guid, export)
+        characterMessage = saved and stored and
+            "Scanned; unchanged or held in memory until WoW saves." or
+            "Capture unavailable: local storage was refused."
+    else
+        characterMessage = "Capture unavailable: client refused character scan."
     end
+    refreshSettingsStatus()
 end
 
 local function captureBagsLocally()
@@ -1205,7 +1238,7 @@ local function captureBagsLocally()
     if ok and export and guid then
         local saved, stored = pcall(saveBagSnapshot, guid, export)
         if saved and stored then
-            bagMessage = "Captured in memory; disk update waits for logout or /reload."
+            bagMessage = "Scanned; unchanged or held in memory until WoW saves."
         else
             bagMessage = "Capture unavailable: local bag storage was refused."
         end
@@ -1228,16 +1261,18 @@ local function captureBankLocally()
     if combat == nil or combat then return end
     -- The shared scanner rejects hidden/account-bank views and protected APIs
     -- before any slot is read for automatic capture.
-    local ok, export, _, guid = pcall(MclarionWow_BuildBankExport)
+    local ok, export, scanError, guid = pcall(MclarionWow_BuildBankExport)
     if ok and export and guid then
         local saved, stored = pcall(saveBankSnapshot, guid, export)
         if saved and stored then
-            bankMessage = "Captured in memory; disk update waits for logout or /reload."
+            bankMessage = "Scanned; unchanged or held in memory until WoW saves."
         else
             bankMessage = "Capture unavailable: local bank storage was refused."
         end
     else
-        bankMessage = "Capture unavailable: client refused the bank scan."
+        bankMessage = scanError == "Character bank view is not active." and
+            "Select your character-bank tab; no scan performed." or
+            "Capture unavailable: client refused the bank scan."
     end
     refreshSettingsStatus()
 end
@@ -1248,10 +1283,10 @@ local function captureItemDetailsLocally(source)
     if not settings or not settings.autoItemMetadataCapture then return end
     local combat = combatStatus()
     if combat == nil or combat then return end
-    local ok, export, _, guid, _, pageCount, resolved, observed
+    local ok, export, scanError, guid, _, pageCount, resolved, observed
     local payload
     if source == "bank" then
-        ok, export, _, guid, _, pageCount, resolved, observed =
+        ok, export, scanError, guid, _, pageCount, resolved, observed =
             pcall(MclarionWow_BuildBankItemExport, 1)
         if ok and export and not isSecret(pageCount) and type(pageCount) == "number" and
             pageCount >= 1 and pageCount <= 9 and pageCount == math.floor(pageCount) and
@@ -1267,20 +1302,67 @@ local function captureItemDetailsLocally(source)
             end
         end
     else
-        ok, export, _, guid, resolved, observed = pcall(MclarionWow_BuildItemExport)
+        ok, export, scanError, guid, resolved, observed = pcall(MclarionWow_BuildItemExport)
         if ok and export and not isSecret(resolved) and not isSecret(observed) and
             resolved == observed then payload = export end
     end
     if payload and guid then
         local saved, stored, storageError = pcall(saveItemMetadata, guid, source, payload)
         itemMessage = saved and stored and
-            "Captured in memory; disk update waits for logout or /reload." or
+            "Scanned; unchanged or held in memory until WoW saves." or
             "Capture unavailable: " .. (saved and (storageError or "local storage refused") or
                 "client refused local storage") .. "."
     else
-        itemMessage = "Capture unavailable: no complete cached item scan."
+        itemMessage = source == "bank" and scanError == "Character bank view is not active." and
+            "Select your character-bank tab; no scan performed." or
+            (scanError == "Item names are not available from the client cache." or
+            (ok and export and not isSecret(resolved) and not isSecret(observed) and
+                type(resolved) == "number" and type(observed) == "number" and
+                resolved ~= observed)) and
+            "Cache incomplete; no replacement saved. Reopen bags later." or
+            "Capture unavailable: client refused a complete item scan."
     end
     refreshSettingsStatus()
+end
+
+captureNow = function(kind)
+    local settings = settingsRoot()
+    local flags = { character = "autoCharacterCapture", bags = "autoBagCapture",
+        bank = "autoBankCapture", items = "autoItemMetadataCapture" }
+    local flag = flags[kind]
+    if not flag then return end
+    local enabled = settings and (kind == "bank" and
+        (settings.autoBankCapture or settings.autoItemMetadataCapture) or settings[flag])
+    if not enabled then
+        local message = settings and "Enable the matching checkbox first." or
+            "Capture unavailable: addon settings were refused."
+        if kind == "character" then characterMessage = message
+        elseif kind == "bags" then bagMessage = message
+        elseif kind == "bank" then bankMessage = message
+        else itemMessage = message end
+        refreshSettingsStatus()
+        return
+    end
+    local combat = combatStatus()
+    if not inWorld or combat ~= false then
+        local message = "Capture unavailable in combat or before world entry."
+        if kind == "character" then characterMessage = message
+        elseif kind == "bags" then bagMessage = message
+        elseif kind == "bank" then bankMessage = message
+        else itemMessage = message end
+        refreshSettingsStatus()
+        return
+    end
+    if kind == "character" then captureLocally()
+    elseif kind == "bags" then captureBagsLocally()
+    elseif kind == "bank" then
+        if settings.autoBankCapture then captureBankLocally()
+        else
+            bankMessage = "Bank totals off; item details only."
+            refreshSettingsStatus()
+        end
+        if settings.autoItemMetadataCapture then captureItemDetailsLocally("bank") end
+    else captureItemDetailsLocally("bags") end
 end
 
 for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "PLAYER_EQUIPMENT_CHANGED",

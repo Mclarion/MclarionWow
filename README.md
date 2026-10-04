@@ -1,15 +1,17 @@
 # MclarionWow
 
-Forever-only, read-only addon for the logged-in character. **0.11.0 removes manual copy/paste exports** and places a 30px clickable icon at the lower-left edge of the minimap. Click it to open/close the settings/status window; `/mhwowui` remains the keyboard fallback. Published code was installed and its hashes read back while WoW was closed; the player subsequently confirmed the icon is present and works in game. Existing SavedVariables and wire formats are preserved.
+Forever-only, read-only addon for the logged-in character. Installed 0.11.0 retired copy/paste exports and added a player-confirmed minimap icon. **0.11.1 source candidate** restores four *capture-now* buttons without restoring copy exports. Existing SavedVariables and wire formats are preserved; 0.11.1 is not installed until the game is closed and release checks pass.
 
 ## Use the game-written file
 
 1. Install `MclarionWow` under Forever's `Interface/AddOns` **while WoW is closed**. The TOC targets interface `16001` and `camelot`.
-2. Click the minimap icon or use `/mhwowui`; explicitly enable the categories you want. All five switches default **off** for a new profile: character, bag, own-character-bank, cached item details, and native combat logging. Existing preferences are preserved. Capture is out of combat and fails closed on secret/protected values. Select the character-bank tab to allow own-bank scans; account/Warband bank tabs are never captured.
+2. Click the minimap icon or use `/mhwowui`; explicitly enable the categories you want. All five switches default **off** for a new profile: character, bag, own-character-bank, cached item details, and native combat logging. The window need not stay open: out-of-combat loot and bag changes trigger bag totals and cached item-details scans; equipment changes trigger character capture. Sorting without a change to total item counts adds no bag-history entry, even though another scan ran. Open the bank: it scans automatically if your **character-bank tab is already active**. If an account/Warband tab is active, select the character-bank tab; the addon cannot safely infer or switch the view for you. Only character-bank tab IDs are captured.
 3. WoW writes `MclarionWowData` to the account SavedVariables `MclarionWow.lua` only on `/reload`, logout or exit. **The addon cannot upload data or create a TXT file.** Deliberately select the *game-written* file (not the addon source) in the signed-in website's Add page or the client's manual import. The remote website cannot read your disk automatically. Its 4 MB limit and per-category import results still matter.
 4. `/mhwowbags` and `/mhwowbankprobe` remain **count-only chat diagnostics**; they do not copy item IDs or store captures. `Stop logging now` is a separate explicit UI action that may also end combat logging started outside this addon. Native combat logs remain separate game-owned files.
 
 **Removed in 0.11.0:** the Character/Bags/Bank copy buttons, selected-text popup, `/mhwow`, `/mhwowidentity`, `/mhwowbagsexport`, `/mhwowitemsexport`, `/mhwowbanksexport` and `/mhwowbankitemsexport`. Their formats are still built internally for the opted-in automatic captures. No database migration or item recapture is required by removing the copy UI. Older website copy fields are not an addon feature.
+
+**New in 0.11.1:** `Character now`, `Bags now`, `Bank now`, and `Items now` retry the same opted-in, out-of-combat scans without opening any copy window. `Items now` scans carried bags and equipped gear; `Bank now` also attempts bank item details when item capture is enabled and the **own-character-bank view is active**. A completed scan can report success even when its deduplicated data did not change. If Items says its cache is incomplete, no replacement metadata was saved and earlier valid details remain; reopen bags later to retry. These buttons do not flush the game file: `/reload`, logout, or exit still does that.
 
 ## Persisted contract
 
@@ -22,7 +24,7 @@ The player reported a real schema-2 website round trip with bag and bank metadat
 
 ## Local validation
 
-Run from this directory: `(cd tests && lua5.4 test_mclarion_wow.lua)`. The Lua mock suite checks automatic capture, bounds, schema-2 preservation, secret-value refusals, removed commands, and minimap toggling (242 assertions). Paired synthetic schema-2 fixture tests cover implicit and explicit bank arrays; fixtures are fake test data, **not** production account uploads. The player confirmed the 0.11.0 minimap icon is present and clickable in game; post-upgrade save/reimport and visual confirmation of all five settings were not separately reported.
+Run from this directory: `(cd tests && lua5.4 test_mclarion_wow.lua)`. The 0.11.1 Lua mock suite checks automatic and capture-now paths, deduplication, independent bank/item opt-ins, bank-view refusal, metadata-cache preservation, schema-2 bounds, removed copy commands, and minimap toggling (264 assertions). Paired synthetic schema-2 fixture tests cover implicit and explicit bank arrays; fixtures are fake test data, **not** production account uploads. The player confirmed the 0.11.0 minimap icon is present and clickable in game and supplied a screenshot with all five switches checked. The new 0.11.1 buttons still need an in-game layout/click check after installation.
 
 ## Safety and later work
 

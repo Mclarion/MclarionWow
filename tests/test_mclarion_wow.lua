@@ -891,12 +891,18 @@ if minimapButton and minimapButton.scripts.OnClick then
     expectTrue(panel and panel:IsShown(), "minimap icon opens the addon settings")
     minimapButton.scripts.OnClick(minimapButton)
     expectTrue(panel and not panel:IsShown(), "minimap icon closes the addon settings")
-    local manualButton = false
+    local actionButtons = {}
     for _, frame in ipairs(frames) do
-        if frame.parent == panel and frame.frameType == "Button" and
-            frame.text ~= "Stop logging now" then manualButton = true end
+        if frame.parent == panel and frame.frameType == "Button" then
+            actionButtons[frame.text] = frame
+        end
     end
-    expectEqual(manualButton, false, "settings no longer offer manual copy buttons")
+    for _, label in ipairs({ "Character now", "Bags now", "Bank now", "Items now" }) do
+        expectTrue(actionButtons[label] and type(actionButtons[label].scripts.OnClick) == "function",
+            label .. " provides an explicit capture without a copy window")
+    end
+    expectEqual(actionButtons["Character"], nil, "old copy-export button remains retired")
+    expectEqual(actionButtons["Bank (manual)"], nil, "old manual bank export button remains retired")
 end
 
 -- Verify that removing clipboard commands does not remove the bounded histories.
@@ -1476,6 +1482,117 @@ expectEqual(afterCount, buttonCount, "missing minimap does not prevent addon loa
 expectTrue(type(SlashCmdList.MCLARIONWOWUI) == "function", "slash UI works without a minimap")
 Minimap = previousMinimap
 C_Item.GetItemInfo = originalMetadataInfo
+
+-- Capture-now buttons reuse the opted-in, bounded event paths without copy UI.
+MclarionWowData = { schema = 1, characters = {}, settings = {
+    autoCombatLog = false, autoCharacterCapture = true, autoBagCapture = true,
+    autoBankCapture = true, autoItemMetadataCapture = true,
+} }
+chunk("MclarionWow", {})
+local actionFrame
+for _, frame in ipairs(frames) do
+    if frame.events and frame.events.PLAYER_ENTERING_WORLD then actionFrame = frame end
+end
+actionFrame.scripts.OnEvent(actionFrame, "PLAYER_ENTERING_WORLD")
+SlashCmdList.MCLARIONWOWUI()
+local actionPanel, actions
+actions = {}
+for _, frame in ipairs(frames) do
+    if frame.name == "MclarionWowSettingsFrame" then actionPanel = frame end
+end
+for _, frame in ipairs(frames) do
+    if frame.parent == actionPanel and frame.frameType == "Button" then actions[frame.text] = frame end
+end
+local function visibleStatus(text)
+    for _, label in ipairs(actionPanel.fontStrings) do
+        if label.text and label.text:find(text, 1, true) then return true end
+    end
+    return false
+end
+expectTrue(visibleStatus("Items now: bags + gear; Bank now: bank items if enabled."),
+    "settings explain which capture-now button updates each item source")
+expectTrue(visibleStatus("Auto-capture works with this window closed"),
+    "settings explain that the addon window need not remain open")
+local actionGuid = "Player-1234-ABCDEF12"
+local bagInfoBeforeAction = C_Container.GetContainerItemInfo
+local oldBagCount = #MclarionWowData.bags[actionGuid]
+C_Container.GetContainerItemInfo = function(bag, slot)
+    if bag == 0 and slot == 1 then return { itemID = 4242, stackCount = 12 } end
+end
+actions["Bags now"].scripts.OnClick(actions["Bags now"])
+expectEqual(#MclarionWowData.bags[actionGuid], oldBagCount + 1,
+    "Bags now captures changed totals without a bag event")
+expectTrue(visibleStatus("Bags: Scanned"), "Bags now reports a completed scan")
+actionPanel:Hide()
+C_Container.GetContainerItemInfo = bagInfoBeforeAction
+local countWithoutMenu = #MclarionWowData.bags[actionGuid]
+actionFrame.scripts.OnEvent(actionFrame, "BAG_UPDATE_DELAYED")
+expectEqual(#MclarionWowData.bags[actionGuid], countWithoutMenu + 1,
+    "bag changes capture automatically while the addon window is closed")
+actionFrame.scripts.OnEvent(actionFrame, "BAG_UPDATE_DELAYED")
+expectEqual(#MclarionWowData.bags[actionGuid], countWithoutMenu + 1,
+    "sorting unchanged bag totals adds no duplicate history")
+actionPanel:Show()
+MclarionWowData.settings.autoBagCapture = false
+local countWhileDisabled = #MclarionWowData.bags[actionGuid]
+actions["Bags now"].scripts.OnClick(actions["Bags now"])
+expectEqual(#MclarionWowData.bags[actionGuid], countWhileDisabled,
+    "Bags now respects the disabled bag capture setting")
+expectTrue(visibleStatus("Bags: Enable the matching checkbox"),
+    "manual capture explains the required opt-in")
+MclarionWowData.settings.autoBagCapture = true
+local oldCharacterCount = #MclarionWowData.characters[actionGuid]
+gear[1] = gear[1] + 1
+actions["Character now"].scripts.OnClick(actions["Character now"])
+expectEqual(#MclarionWowData.characters[actionGuid], oldCharacterCount + 1,
+    "Character now captures a changed equipment state without an equipment event")
+expectTrue(visibleStatus("Character: Scanned"), "Character now reports a completed scan")
+local bankTypeBeforeAction = BankFrame.bankType
+BankFrame.bankType = 2
+local bankBeforeAction = MclarionWowData.bank and MclarionWowData.bank[actionGuid]
+actions["Bank now"].scripts.OnClick(actions["Bank now"])
+expectEqual(MclarionWowData.bank and MclarionWowData.bank[actionGuid], bankBeforeAction,
+    "Bank now never scans the account-bank view")
+expectTrue(visibleStatus("Bank: Select your character-bank tab"),
+    "Bank now explains the required active character-bank view")
+BankFrame.bankType = bankTypeBeforeAction
+local slotsBeforeBankAction = C_Container.GetContainerNumSlots
+local infoBeforeBankAction = C_Container.GetContainerItemInfo
+C_Container.GetContainerNumSlots = function(tab)
+    if tab == 6 then return 1 end
+    return slotsBeforeBankAction(tab)
+end
+C_Container.GetContainerItemInfo = function(tab, slot)
+    if tab == 6 and slot == 1 then return { itemID = 4242, stackCount = 1 } end
+    return infoBeforeBankAction(tab, slot)
+end
+actions["Bank now"].scripts.OnClick(actions["Bank now"])
+local capturedBank = MclarionWowData.bank and MclarionWowData.bank[actionGuid]
+expectTrue(capturedBank and #capturedBank == 1 and visibleStatus("Bank: Scanned"),
+    "Bank now captures own-bank totals once the character-bank view is active")
+MclarionWowData.settings.autoBankCapture = false
+MclarionWowData.items[actionGuid] = nil
+actions["Bank now"].scripts.OnClick(actions["Bank now"])
+local refreshedItemRecord = MclarionWowData.items and MclarionWowData.items[actionGuid]
+expectTrue(refreshedItemRecord and refreshedItemRecord.bank and #refreshedItemRecord.bank == 1,
+    "Bank now can update separately opted-in bank item details without bank totals opt-in")
+expectTrue(visibleStatus("Bank: Bank totals off; item details only."),
+    "Bank now explains why numeric bank totals were not captured")
+MclarionWowData.settings.autoBankCapture = true
+C_Container.GetContainerNumSlots = slotsBeforeBankAction
+C_Container.GetContainerItemInfo = infoBeforeBankAction
+local itemInfoBeforeAction = C_Item.GetItemInfo
+C_Item.GetItemInfo = function() return nil end
+actions["Items now"].scripts.OnClick(actions["Items now"])
+expectTrue(visibleStatus("Items: Cache incomplete"),
+    "Items now explains why uncached items did not replace previous metadata")
+C_Item.GetItemInfo = itemInfoBeforeAction
+local combatBeforeAction = InCombatLockdown
+_G.InCombatLockdown = function() error("client refused combat status") end
+local safeButton = pcall(actions["Bags now"].scripts.OnClick, actions["Bags now"])
+expectTrue(safeButton and visibleStatus("Bags: Capture unavailable: client refused requested scan"),
+    "capture-now button contains a client API refusal and reports it without a Lua error")
+_G.InCombatLockdown = combatBeforeAction
 
 if failures > 0 then
     io.stderr:write(string.format("\n%d/%d assertions failed\n", failures, tests))
