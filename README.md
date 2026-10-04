@@ -22,6 +22,8 @@ Two **synthetic, test-only** schema-2 files exercise the same builder-produced d
 
 **Unchanged-file retry (player-reported):** selecting that same game-written file again, without another game save, returned **0 new snapshots, 71 unchanged, no errors**. This verifies player-reported idempotence for that file; it does not explain the earlier 0/0 item row or prove parity for every character and item field. Keep the legacy clipboard fallback available for unsupported or missing details while those gaps are investigated.
 
+**Desktop icon gap (player screenshot, 2026-10-04):** one equipment slot shows an item ID and “Metadata unavailable for build 70205,” while the client reports 38 previously observed texture IDs queued for refresh when viewed. `MHWOWI1` stores a numeric texture file ID alongside each *cached, named* item—not image bytes. A character/bag/bank totals snapshot alone cannot identify an exact icon. The desktop resolves item metadata by **character and build** from its own local imports; a website upload does not update that database. Refreshing already observed texture IDs cannot supply missing metadata for this slot. Confirm whether this character's complete item-details capture was saved and separately imported into the desktop client before diagnosing icon download failures. Do not publish the pictured item ID or assume the site's metadata is present locally.
+
 ## Use
 
 1. Install the `MclarionWow` directory under the Forever client's `Interface/AddOns` directory **while the client is closed**. The TOC targets interface `16001` and game type `camelot`; installation alone does not prove in-game compatibility.
