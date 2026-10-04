@@ -1,5 +1,9 @@
 # MclarionWow handoff TODO — 2026-10-04
 
+**0.11.3 candidate:** Extend the existing opt-in own-character MHWOW2 snapshot retry to level-up and zone-change events. Level/map/zone are already bounded by the 20-record character history and require no website parser or schema change; reject empty zone text. This is not an exhaustive travel history. Mock tests pass; live Forever event checks remain pending.
+
+**Closed at player request:** The earlier empty Hel snapshot investigation is done for now. The cause remains unknown; retain 0.11.2's safety guards and historical evidence, but do not request more Hel checks unless the player reopens the issue.
+
 **0.11.2 installed (`eca6bab`):** A player-reported subsequent scan restored the affected character's bag display. Earlier imported payloads contained a populated snapshot followed by an empty latest snapshot; the source of the empty scan remains unproven. Regression tests reproduce a failure mode in 0.11.1: zero/uninitialized bag or bank views, or transient all-nil item reads, could append an empty state over a known populated one. Release guards preserve history for automatic scans and let a player explicitly confirm genuine emptiness after inspecting the visible bags/bank. No schema or wire changes; 281 mocked assertions pass. WoW was stopped during installation; a separate readback verified installed version/hashes and a recoverable 0.11.1 backup. The player reports all four buttons present and tried. A screenshot shows Character/Bags/Items scanned and Bank initially refusing an inactive character-bank view; later, Bank showed scanned on opening settings and pressing Bank now left that success text unchanged. The identical text is expected on a successful unchanged retry. That UI observation alone was in-memory evidence; the player later reported a successful website bank update after saving and selecting the file.
 
 ## 0.11.2 safety release checks
@@ -32,9 +36,11 @@
 - [x] The later screenshot shows all five retained settings checked and no copy buttons in installed 0.11.0.
 - [ ] A post-0.11.0 save/reimport was not separately reported; prior schema-2 round trips remain the compatibility evidence.
 
-## Next progression work (not shipped)
+## Next progression work
 
-- [ ] Prototype one bounded, read-only own-character zone/level observation after checking actual Forever APIs and consent; design a versioned storage/import contract before collecting it. Quest/reputation, talents and profession/recipe sources follow separately only when each source and parser is validated. No gameplay automation.
+- [x] Implement the first zone/level observation slice using the existing opted-in, versioned MHWOW2 own-character snapshot and 20-entry bound; add level/zone event retries and reject missing zone text. No new storage contract or importer changes are needed for this limited slice.
+- [ ] Confirm level/zone event behavior in the live Forever client; mocked events cannot prove game delivery. Do not claim an exhaustive travel history.
+- [ ] Validate quest/reputation source APIs and a separate bounded contract before coding; talents and professions/recipes follow independently. No gameplay automation.
 
 ## Archived 0.10.x status (historical, superseded where above differs)
 

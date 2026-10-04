@@ -921,6 +921,28 @@ expectTrue(history and #history == 1 and history[1]:find("^MHWOW2|forever|") ~= 
     "automatic character snapshot remains available without manual commands")
 expectTrue(bagHistory and #bagHistory == 1 and bagHistory[1]:find("^MHWOWB1|forever|") ~= nil,
     "automatic bag snapshot remains available without manual commands")
+expectTrue(historyFrame.events.PLAYER_LEVEL_UP and historyFrame.events.ZONE_CHANGED and
+    historyFrame.events.ZONE_CHANGED_INDOORS,
+    "level and zone notifications trigger the opted-in character observation")
+local originalLevel, originalZone = UnitLevel, GetZoneText
+_G.UnitLevel = function(unit) assert(unit == "player"); return 81 end
+now = now + 1
+historyFrame.scripts.OnEvent(historyFrame, "PLAYER_LEVEL_UP", 81)
+expectEqual(#history, 2, "level-up appends a versioned own-character observation")
+expectTrue(history[2] and history[2]:find("|81|2339|", 1, true) ~= nil,
+    "level observation uses the validated UnitLevel result")
+historyFrame.scripts.OnEvent(historyFrame, "PLAYER_LEVEL_UP", 81)
+expectEqual(#history, 2, "unchanged level-up event does not append a duplicate")
+_G.GetZoneText = function() return "Another Zone" end
+now = now + 1
+historyFrame.scripts.OnEvent(historyFrame, "ZONE_CHANGED")
+expectEqual(#history, 3, "zone transition appends a versioned own-character observation")
+expectTrue(history[3] and history[3]:find("|Another Zone|", 1, true) ~= nil,
+    "zone observation uses the validated zone text")
+_G.GetZoneText = function() return "" end
+historyFrame.scripts.OnEvent(historyFrame, "ZONE_CHANGED_INDOORS")
+expectEqual(#history, 3, "unavailable zone text cannot append a transient empty observation")
+_G.UnitLevel, _G.GetZoneText = originalLevel, originalZone
 now = now + 1
 historyFrame.scripts.OnEvent(historyFrame, "BAG_UPDATE_DELAYED")
 expectEqual(#bagHistory, 1, "unchanged bag totals still deduplicate")

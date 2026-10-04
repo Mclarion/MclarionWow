@@ -130,7 +130,7 @@ function MclarionWow_BuildExport()
     elseif not nonnegativeInteger(mapId) or mapId > 2147483647 then
         return nil, "Map ID is invalid."
     end
-    if type(zoneText) ~= "string" or #zoneText > 120 then
+    if type(zoneText) ~= "string" or zoneText == "" or #zoneText > 120 then
         return nil, "Zone name is unavailable."
     end
     if zoneText:find("[%c]") then
@@ -1388,6 +1388,7 @@ captureNow = function(kind)
 end
 
 for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "PLAYER_EQUIPMENT_CHANGED",
+    "PLAYER_LEVEL_UP", "ZONE_CHANGED", "ZONE_CHANGED_INDOORS",
     "ZONE_CHANGED_NEW_AREA", "PLAYER_REGEN_ENABLED", "BAG_UPDATE_DELAYED", "BAG_OPEN",
     "BANKFRAME_OPENED", "PLAYERBANKSLOTS_CHANGED", "BANK_TABS_CHANGED" }) do
     captureFrame:RegisterEvent(event)
