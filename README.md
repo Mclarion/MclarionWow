@@ -10,6 +10,8 @@ For the exact storage lifecycle, `MclarionWowData` keys, capture triggers, manua
 
 A **synthetic, test-only** schema-2 file with two own-bank item pages is available at [`tests/schema2-synthetic.lua`](tests/schema2-synthetic.lua), with a fixture check in `tests/test_schema2_fixture.lua`, for parallel reader development. It is not a player save: never upload it to a production account.
 
+**Real-file website check (player-reported, 2026-10-04):** the Add page accepted the game-written schema-2 save. The website showed 20 imported bag snapshots (latest displayed observation 2026-10-04 10:43 UTC) and one older bank snapshot (2026-10-03 20:43 UTC), all at build 70205. Its item table included a 33-distinct-ID/260-total row and a separate 0/0 row; the player reported visible item data and images. The meaning of the 0/0 row, metadata provenance, and category-by-category parity were not independently verified. No own-bank scan occurred during this new test, so no fresh bank details were expected. Unchanged bank totals also deduplicate rather than creating a new timestamp; opening the own-character bank while out of combat is still needed to test bank metadata capture.
+
 ## Use
 
 1. Install the `MclarionWow` directory under the Forever client's `Interface/AddOns` directory **while the client is closed**. The TOC targets interface `16001` and game type `camelot`; installation alone does not prove in-game compatibility.
