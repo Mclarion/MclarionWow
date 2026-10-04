@@ -1,6 +1,6 @@
 # MclarionWow: current SavedVariables handoff
 
-**0.11.0 source candidate (4 October 2026):** The user confirmed a fresh file import resolved the affected client's missing item metadata, and confirmed the one-file round trip and remaining check done. This release removes all manual text-copy export commands/buttons/popup and adds a clickable minimap-adjacent icon for `/mhwowui`. The count-only `/mhwowbags` and `/mhwowbankprobe` chat diagnostics remain. The 0.11.0 Lua mock suite passes 242 assertions; in-game visual/click verification is still pending. Until installation is read back, the last confirmed game runtime is **0.10.1**. Historical sections below record old command observations and **must not be used as current instructions**.
+**0.11.0 installed source (4 October 2026):** Published addon code `1acd68f` was installed while WoW was stopped; a separate readback verified matching Lua/TOC SHA-256 hashes, version 0.11.0, and a recoverable 0.10.1 code backup. The user confirmed a fresh file import resolved the affected client's missing item metadata and the one-file round trip is complete. This release removes manual text-copy export commands/buttons/popup and adds a clickable minimap-adjacent icon for `/mhwowui`. Count-only `/mhwowbags` and `/mhwowbankprobe` chat diagnostics remain. The Lua mock suite passes 242 assertions; **in-game icon placement/click is not yet verified**. Historical sections below record old command observations and **must not be used as current instructions**.
 
 ## Data paths and ownership
 

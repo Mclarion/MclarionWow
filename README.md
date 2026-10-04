@@ -1,6 +1,6 @@
 # MclarionWow
 
-Forever-only, read-only addon for the logged-in character. **0.11.0 removes manual copy/paste exports** and places a 30px clickable icon at the lower-left edge of the minimap. Click it to open/close the settings/status window; `/mhwowui` remains the keyboard fallback. The minimap control still needs an in-game visual check. Existing SavedVariables and wire formats are preserved.
+Forever-only, read-only addon for the logged-in character. **0.11.0 removes manual copy/paste exports** and places a 30px clickable icon at the lower-left edge of the minimap. Click it to open/close the settings/status window; `/mhwowui` remains the keyboard fallback. Published code was installed and its hashes read back while WoW was closed; the minimap control still needs an in-game visual check. Existing SavedVariables and wire formats are preserved.
 
 ## Use the game-written file
 
