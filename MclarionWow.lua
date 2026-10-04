@@ -31,11 +31,13 @@ local function escapeText(value)
 end
 
 local function positiveInteger(value)
-    return type(value) == "number" and value > 0 and value == math.floor(value)
+    return type(value) == "number" and value > 0 and value < math.huge and
+        value == math.floor(value)
 end
 
 local function nonnegativeInteger(value)
-    return type(value) == "number" and value >= 0 and value == math.floor(value)
+    return type(value) == "number" and value >= 0 and value < math.huge and
+        value == math.floor(value)
 end
 
 local function exportApisAvailable(...)
@@ -410,6 +412,126 @@ function MclarionWow_ProbeProgressionRecords()
     local factions = factionRecordSummary()
     return string.format("Quest records: %s; faction records: %s (visible rows only). " ..
         "No progression data saved.", quests, factions)
+end
+
+-- Diagnostic only: this client-build candidate returns row tables, unlike
+-- the legacy multi-return getters. Never retain or print their fields.
+local function namespacedProgressionMethod(namespace, name)
+    if isSecret(namespace) then return nil, "protected" end
+    if type(namespace) ~= "table" then return nil, "namespace missing" end
+    if issecrettable(namespace) then return nil, "protected" end
+    local ok, method = pcall(function() return namespace[name] end)
+    if not ok then return nil, "getter inaccessible" end
+    if isSecret(method) then return nil, "protected" end
+    if type(method) ~= "function" then return nil, "getter missing" end
+    return method
+end
+
+local function namespacedProgressionCount(namespace, name, limit)
+    local read, reason = namespacedProgressionMethod(namespace, name)
+    if not read then return nil, reason end
+    local ok, count = pcall(read)
+    if not ok then return nil, "count call failed" end
+    if isSecret(count) then return nil, "protected" end
+    if not nonnegativeInteger(count) then return nil, "count invalid" end
+    if count > limit then return nil, "over limit" end
+    return count
+end
+
+local function namespacedQuestSummary()
+    local count, reason = namespacedProgressionCount(C_QuestLog,
+        "GetNumQuestLogEntries", 128)
+    if not count then return reason end
+    local read
+    read, reason = namespacedProgressionMethod(C_QuestLog, "GetInfo")
+    if not read then return reason end
+    local leaves = 0
+    for index = 1, count do
+        local ok, info = pcall(read, index)
+        if not ok then return "row call failed" end
+        if isSecret(info) then return "protected" end
+        if type(info) ~= "table" then return "row missing" end
+        if issecrettable(info) then return "protected" end
+        local fieldsOk, header, logIndex = pcall(function()
+            return info.isHeader, info.questLogIndex
+        end)
+        if not fieldsOk then return "field access failed" end
+        if isSecret(header) or isSecret(logIndex) then
+            return "protected"
+        end
+        if type(header) ~= "boolean" or not positiveInteger(logIndex) or
+            logIndex ~= index then return "row shape invalid" end
+        if not header then
+            local idOk, questId = pcall(function() return info.questID end)
+            if not idOk then return "field access failed" end
+            if isSecret(questId) then return "protected" end
+            if not positiveInteger(questId) or questId > 2147483647 then
+                return "quest ID invalid"
+            end
+            leaves = leaves + 1
+        end
+    end
+    return leaves .. "/" .. count
+end
+
+local function namespacedFactionSummary()
+    local count, reason = namespacedProgressionCount(C_Reputation, "GetNumFactions", 256)
+    if not count then return reason end
+    local read
+    read, reason = namespacedProgressionMethod(C_Reputation, "GetFactionDataByIndex")
+    if not read then return reason end
+    local leaves, headerRep, collapsed = 0, 0, 0
+    for index = 1, count do
+        local ok, info = pcall(read, index)
+        if not ok then return "row call failed" end
+        if isSecret(info) then return "protected" end
+        if type(info) ~= "table" then return "row missing" end
+        if issecrettable(info) then return "protected" end
+        local fieldsOk, header, withRep, isCollapsed = pcall(function()
+            return info.isHeader, info.isHeaderWithRep, info.isCollapsed
+            end)
+        if not fieldsOk then return "field access failed" end
+        if isSecret(header) or isSecret(withRep) or isSecret(isCollapsed) then
+            return "protected"
+        end
+        if type(header) ~= "boolean" or type(withRep) ~= "boolean" or
+            type(isCollapsed) ~= "boolean" then return "row shape invalid" end
+        if header then
+            if withRep then headerRep = headerRep + 1 end
+            if isCollapsed then collapsed = collapsed + 1 end
+        else
+            local leafOk, factionId, reaction, barMin, barMax, barValue = pcall(function()
+                return info.factionID, info.reaction, info.currentReactionThreshold,
+                    info.nextReactionThreshold, info.currentStanding
+            end)
+            if not leafOk then return "field access failed" end
+            if isSecret(factionId) or isSecret(reaction) or isSecret(barMin) or
+                isSecret(barMax) or isSecret(barValue) then return "protected" end
+            if not positiveInteger(factionId) or factionId > 2147483647 then
+                return "faction ID invalid"
+            end
+            if not positiveInteger(reaction) or reaction > 16 then
+                return "reaction invalid"
+            end
+            if not boundedStandingValue(barMin) or
+                not boundedStandingValue(barMax) or
+                not boundedStandingValue(barValue) or barMin >= barMax or
+                barValue < barMin or barValue > barMax then
+                return "standing interval unsupported"
+            end
+            leaves = leaves + 1
+        end
+    end
+    return string.format("%d/%d (header-rep %d, collapsed %d)", leaves,
+        count, headerRep, collapsed)
+end
+
+function MclarionWow_ProbeProgressionNamespaced()
+    local combat, err = combatStatus()
+    if combat == nil then return nil, err end
+    if combat then return nil, "Namespaced progression probe is unavailable during combat." end
+    return string.format("Quest-log leaves: %s; faction visible: %s. No progression data saved.",
+        namespacedQuestSummary(), namespacedFactionSummary())
 end
 
 -- Shared fail-closed scanner for explicitly requested reads of the logged-in
@@ -1333,6 +1455,12 @@ SLASH_MCLARIONWOWPROGRESSRECORDS1 = "/mhwowprogressrecords"
 SlashCmdList.MCLARIONWOWPROGRESSRECORDS = function()
     local ok, report, err = pcall(MclarionWow_ProbeProgressionRecords)
     print("MclarionWow: " .. (ok and (report or err) or "Progression record probe unavailable."))
+end
+
+SLASH_MCLARIONWOWPROGRESSNAMESPACED1 = "/mhwowprogressnamespaced"
+SlashCmdList.MCLARIONWOWPROGRESSNAMESPACED = function()
+    local ok, report, err = pcall(MclarionWow_ProbeProgressionNamespaced)
+    print("MclarionWow: " .. (ok and (report or err) or "Namespaced progression probe unavailable."))
 end
 
 local captureFrame = CreateFrame("Frame")

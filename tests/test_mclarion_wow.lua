@@ -488,6 +488,167 @@ if type(MclarionWow_ProbeProgressionRecords) == "function" then
     MclarionWowData = oldData
 end
 
+expectTrue(type(MclarionWow_ProbeProgressionNamespaced) == "function" and
+    type(SlashCmdList.MCLARIONWOWPROGRESSNAMESPACED) == "function",
+    "provides a separate manual namespaced progression shape probe")
+if type(MclarionWow_ProbeProgressionNamespaced) == "function" then
+    local oldQuestCount, oldFactionCount = GetNumQuestLogEntries, GetNumFactions
+    local oldQuestTitle, oldFactionInfo = GetQuestLogTitle, GetFactionInfo
+    local oldQuestApi, oldReputationApi = C_QuestLog, C_Reputation
+    local oldData = MclarionWowData
+    MclarionWowData = { schema = 2, characters = { ["Player-1234-ABCDEF12"] = { "existing snapshot" } } }
+    local expectedData = { schema = 2, characters = { ["Player-1234-ABCDEF12"] = { "existing snapshot" } } }
+    _G.GetNumQuestLogEntries = function() error("do not call legacy count") end
+    _G.GetNumFactions = function() error("do not call legacy count") end
+    _G.GetQuestLogTitle = function() error("do not call legacy getter") end
+    _G.GetFactionInfo = function() error("do not call legacy getter") end
+    _G.C_QuestLog = {
+        GetNumQuestLogEntries = function() return 2, 1 end,
+        GetInfo = function(index)
+            if index == 1 then return { title = "private header", questLogIndex = index,
+                questID = 0, isHeader = true } end
+            return { title = "private quest", questLogIndex = index, questID = 4242,
+                isHeader = false }
+        end,
+    }
+    _G.C_Reputation = {
+        GetNumFactions = function() return 3 end,
+        GetFactionDataByIndex = function(index)
+            if index == 1 then return { name = "private header rep", isHeader = true,
+                isHeaderWithRep = true, isCollapsed = false } end
+            if index == 2 then return { name = "private collapsed", isHeader = true,
+                isHeaderWithRep = false, isCollapsed = true } end
+            return { name = "private faction", factionID = 5678, reaction = 4,
+                currentReactionThreshold = 0, nextReactionThreshold = 3000,
+                currentStanding = 1200, isHeader = false, isHeaderWithRep = false,
+                isCollapsed = false }
+        end,
+    }
+    local report, problem = MclarionWow_ProbeProgressionNamespaced()
+    expectEqual(problem, nil, "namespaced shape probe returns without an error")
+    expectTrue(report and report:find("Quest-log leaves: 1/2", 1, true) and
+        report:find("faction visible: 1/3 (header-rep 1, collapsed 1)", 1, true) and
+        report:find("No progression data saved.", 1, true) and
+        report:find("4242", 1, true) == nil and report:find("5678", 1, true) == nil and
+        report:find("private", 1, true) == nil,
+        "namespaced quest and faction shapes report only bounded aggregate counts")
+    local unusedHeaderField = protectedSentinel()
+    secretValues[unusedHeaderField] = true
+    local normalQuestRead, normalFactionRead = C_QuestLog.GetInfo,
+        C_Reputation.GetFactionDataByIndex
+    C_QuestLog.GetInfo = function(index)
+        if index == 1 then return { isHeader = true, questLogIndex = index,
+            questID = unusedHeaderField } end
+        return normalQuestRead(index)
+    end
+    C_Reputation.GetFactionDataByIndex = function(index)
+        if index == 1 then return { isHeader = true, isHeaderWithRep = true,
+            isCollapsed = false, factionID = unusedHeaderField,
+            currentStanding = unusedHeaderField } end
+        return normalFactionRead(index)
+    end
+    report = MclarionWow_ProbeProgressionNamespaced()
+    expectTrue(report and report:find("Quest-log leaves: 1/2", 1, true) and
+        report:find("faction visible: 1/3 (header-rep 1, collapsed 1)", 1, true) ~= nil,
+        "unused header ID and standing fields are never inspected")
+    C_QuestLog.GetInfo, C_Reputation.GetFactionDataByIndex = normalQuestRead, normalFactionRead
+    secretValues[unusedHeaderField] = nil
+    SlashCmdList.MCLARIONWOWPROGRESSNAMESPACED()
+    expectTrue(sameData(MclarionWowData, expectedData),
+        "namespaced probe and slash handler never modify SavedVariables")
+    local protectedRow = protectedSentinel()
+    secretTables[protectedRow] = true
+    local questRead = C_QuestLog.GetInfo
+    C_QuestLog.GetInfo = function() return protectedRow end
+    report = MclarionWow_ProbeProgressionNamespaced()
+    expectTrue(report and report:find("Quest-log leaves: protected", 1, true) and
+        report:find("faction visible: 1/3", 1, true) ~= nil,
+        "protected quest result refuses only its category before member access")
+    secretTables[protectedRow] = nil
+    C_QuestLog.GetInfo = questRead
+    local protectedField = protectedSentinel()
+    secretValues[protectedField] = true
+    C_QuestLog.GetInfo = function(index)
+        return { isHeader = false, questID = protectedField, questLogIndex = index }
+    end
+    local factionRead = C_Reputation.GetFactionDataByIndex
+    C_Reputation.GetFactionDataByIndex = function()
+        return { isHeader = false, isHeaderWithRep = false, isCollapsed = false,
+            factionID = 5678, reaction = 4, currentReactionThreshold = 0,
+            nextReactionThreshold = 3000, currentStanding = protectedField }
+    end
+    report = MclarionWow_ProbeProgressionNamespaced()
+    expectTrue(report and report:find("Quest-log leaves: protected", 1, true) and
+        report:find("faction visible: protected", 1, true) ~= nil,
+        "protected quest IDs and faction standings refuse before numeric inspection")
+    secretValues[protectedField] = nil
+    C_QuestLog.GetInfo, C_Reputation.GetFactionDataByIndex = questRead, factionRead
+    local rowCalls = 0
+    C_QuestLog.GetNumQuestLogEntries = function() return 129 end
+    C_Reputation.GetNumFactions = function() return 257 end
+    C_QuestLog.GetInfo = function() rowCalls = rowCalls + 1 end
+    C_Reputation.GetFactionDataByIndex = function() rowCalls = rowCalls + 1 end
+    report = MclarionWow_ProbeProgressionNamespaced()
+    expectTrue(report and report:find("Quest-log leaves: over limit", 1, true) and
+        report:find("faction visible: over limit", 1, true) and rowCalls == 0,
+        "over-limit namespaced counts refuse before any per-row read")
+    C_QuestLog.GetNumQuestLogEntries = function() return 0 end
+    C_Reputation.GetNumFactions = function() return 0 end
+    report = MclarionWow_ProbeProgressionNamespaced()
+    expectTrue(report and report:find("Quest-log leaves: 0/0", 1, true) and
+        report:find("faction visible: 0/0 (header-rep 0, collapsed 0)", 1, true) and
+        rowCalls == 0,
+        "empty visible lists are valid observations without calling row getters")
+    inCombat = true
+    report, problem = MclarionWow_ProbeProgressionNamespaced()
+    expectTrue(report == nil and type(problem) == "string" and
+        problem:find("combat", 1, true) ~= nil and rowCalls == 0,
+        "namespaced probe refuses combat before querying either namespace")
+    inCombat = false
+    expectTrue(sameData(MclarionWowData, expectedData),
+        "protected, over-limit and combat probes leave nested SavedVariables unchanged")
+    local questApi = C_QuestLog
+    _G.C_QuestLog = protectedSentinel()
+    secretTables[C_QuestLog] = true
+    report = MclarionWow_ProbeProgressionNamespaced()
+    expectTrue(report and report:find("Quest-log leaves: protected", 1, true) ~= nil,
+        "protected quest namespace refuses before member lookup")
+    secretTables[C_QuestLog] = nil
+    _G.C_QuestLog = questApi
+    C_QuestLog.GetNumQuestLogEntries = function() return 1 end
+    C_Reputation.GetNumFactions = function() return 1 end
+    C_QuestLog.GetInfo = function() error("mock getter failure") end
+    C_Reputation.GetFactionDataByIndex = function()
+        return setmetatable({}, { __index = function() error("mock member failure") end })
+    end
+    report = MclarionWow_ProbeProgressionNamespaced()
+    expectTrue(report and report:find("Quest-log leaves: row call failed", 1, true) and
+        report:find("faction visible: field access failed", 1, true) ~= nil,
+        "throwing row calls and inaccessible fields refuse without leaking errors")
+    C_QuestLog.GetInfo = function() return nil end
+    C_Reputation.GetFactionDataByIndex = function()
+        return { isHeader = false, isHeaderWithRep = false, isCollapsed = false,
+            factionID = 5678, reaction = 4, currentReactionThreshold = 0,
+            nextReactionThreshold = 3000, currentStanding = 0 / 0 }
+    end
+    report = MclarionWow_ProbeProgressionNamespaced()
+    expectTrue(report and report:find("Quest-log leaves: row missing", 1, true) and
+        report:find("faction visible: standing interval unsupported", 1, true) ~= nil,
+        "nil quest rows and non-finite faction intervals give distinct refusals")
+    C_QuestLog.GetNumQuestLogEntries = nil
+    C_Reputation.GetNumFactions = function() return 1 / 0 end
+    report = MclarionWow_ProbeProgressionNamespaced()
+    expectTrue(report and report:find("Quest-log leaves: getter missing", 1, true) and
+        report:find("faction visible: count invalid", 1, true) ~= nil,
+        "missing count getter and non-finite count refuse before reading any rows")
+    expectTrue(sameData(MclarionWowData, expectedData),
+        "malformed and unavailable namespaced APIs leave SavedVariables unchanged")
+    _G.GetNumQuestLogEntries, _G.GetNumFactions = oldQuestCount, oldFactionCount
+    _G.GetQuestLogTitle, _G.GetFactionInfo = oldQuestTitle, oldFactionInfo
+    _G.C_QuestLog, _G.C_Reputation = oldQuestApi, oldReputationApi
+    MclarionWowData = oldData
+end
+
 expectTrue(type(MclarionWow_ProbeBank) == "function", "provides a manual count-only character bank probe")
 if type(MclarionWow_ProbeBank) == "function" then
     local oldSlots, oldInfo = C_Container.GetContainerNumSlots, C_Container.GetContainerItemInfo
