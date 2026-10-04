@@ -369,6 +369,7 @@ expectTrue(type(MclarionWow_ProbeProgressionRecords) == "function" and
 if type(MclarionWow_ProbeProgressionRecords) == "function" then
     local oldQuestCount, oldFactionCount = GetNumQuestLogEntries, GetNumFactions
     local oldQuestTitle, oldFactionInfo = GetQuestLogTitle, GetFactionInfo
+    local oldQuestApi, oldReputationApi = C_QuestLog, C_Reputation
     local oldData = MclarionWowData
     MclarionWowData = { schema = 2, characters = { ["Player-1234-ABCDEF12"] = { "existing snapshot" } } }
     local expectedData = { schema = 2, characters = { ["Player-1234-ABCDEF12"] = { "existing snapshot" } } }
@@ -400,8 +401,8 @@ if type(MclarionWow_ProbeProgressionRecords) == "function" then
             false, true, nil, false, 5678
     end
     report = MclarionWow_ProbeProgressionRecords()
-    expectTrue(report and report:find("faction records: unavailable", 1, true) ~= nil,
-        "non-finite standing values cannot be counted as valid faction records")
+    expectTrue(report and report:find("faction records: bar values invalid", 1, true) ~= nil,
+        "non-finite bar values give a distinct refusal without exposing their value")
     local protectedField = protectedSentinel()
     secretValues[protectedField] = true
     _G.GetQuestLogTitle = function(index)
@@ -435,8 +436,55 @@ if type(MclarionWow_ProbeProgressionRecords) == "function" then
     inCombat = false
     expectTrue(sameData(MclarionWowData, expectedData),
         "protected, oversized and combat record probes never change SavedVariables")
+    _G.GetNumQuestLogEntries = function() return 1 end
+    _G.GetNumFactions = function() return 1 end
+    _G.GetQuestLogTitle, _G.GetFactionInfo = nil, nil
+    _G.C_QuestLog = { GetInfo = function() error("diagnostic must not call candidate") end }
+    _G.C_Reputation = { GetFactionDataByIndex = function() error("diagnostic must not call candidate") end }
+    report = MclarionWow_ProbeProgressionRecords()
+    expectTrue(report and report:find("Quest records: legacy getter missing (namespaced candidate present)", 1, true) and
+        report:find("faction records: legacy getter missing (namespaced candidate present)", 1, true) ~= nil,
+        "missing legacy row methods are distinguished from safe namespaced candidate availability")
+    expectTrue(sameData(MclarionWowData, expectedData),
+        "method-availability diagnostics leave SavedVariables unchanged")
+    _G.C_QuestLog = setmetatable({}, { __index = function()
+        error("mock candidate namespace is inaccessible") end })
+    _G.C_Reputation = protectedSentinel()
+    secretTables[C_Reputation] = true
+    report = MclarionWow_ProbeProgressionRecords()
+    expectTrue(report and
+        report:find("Quest records: legacy getter missing (namespaced candidate inaccessible)", 1, true) and
+        report:find("faction records: legacy getter missing (namespaced candidate protected)", 1, true) ~= nil,
+        "inaccessible and protected candidate namespaces refuse safely")
+    secretTables[C_Reputation] = nil
+    expectTrue(sameData(MclarionWowData, expectedData),
+        "candidate namespace refusals leave SavedVariables unchanged")
+    _G.GetQuestLogTitle = function() return "private quest", 80, nil, nil,
+        nil, nil, nil, 4242 end
+    _G.GetFactionInfo = function() return "private faction", nil, 4, 0, 3000,
+        1200, nil, nil, nil, false, true, nil, false, 5678 end
+    report = MclarionWow_ProbeProgressionRecords()
+    expectTrue(report and report:find("Quest records: header flag invalid", 1, true) and
+        report:find("faction records: header flag invalid", 1, true) ~= nil,
+        "unsupported header field shapes are distinguished from missing getters")
+    _G.GetQuestLogTitle = function() return "private quest", 80, nil, false,
+        nil, nil, nil, nil end
+    _G.GetFactionInfo = function() return "private faction", nil, 4, 0, 3000,
+        1200, nil, nil, false, false, true, nil, false, nil end
+    report = MclarionWow_ProbeProgressionRecords()
+    expectTrue(report and report:find("Quest records: quest ID invalid", 1, true) and
+        report:find("faction records: faction ID invalid", 1, true) ~= nil,
+        "missing leaf ID fields are distinguished from malformed headers")
+    _G.GetQuestLogTitle = function() error("protected mock getter failure") end
+    _G.GetFactionInfo = function() return "private faction", nil, nil, 0, 3000,
+        1200, nil, nil, false, false, true, nil, false, 5678 end
+    report = MclarionWow_ProbeProgressionRecords()
+    expectTrue(report and report:find("Quest records: getter call failed", 1, true) and
+        report:find("faction records: standing invalid", 1, true) ~= nil,
+        "getter failures and invalid standing fields have distinct non-private reasons")
     _G.GetNumQuestLogEntries, _G.GetNumFactions = oldQuestCount, oldFactionCount
     _G.GetQuestLogTitle, _G.GetFactionInfo = oldQuestTitle, oldFactionInfo
+    _G.C_QuestLog, _G.C_Reputation = oldQuestApi, oldReputationApi
     MclarionWowData = oldData
 end
 

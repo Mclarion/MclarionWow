@@ -312,9 +312,27 @@ end
 
 -- Diagnostic only. Read candidate leaf shapes without keeping IDs or values.
 -- An unsupported row refuses its category rather than silently omitting it.
-local function progressionRecordMethod(api)
+local function progressionRecordMethod(api, namespace, candidateName)
     if isSecret(api) then return nil, "protected" end
-    if type(api) ~= "function" then return nil, "unavailable" end
+    if type(api) ~= "function" then
+        if isSecret(namespace) or
+            (type(namespace) == "table" and issecrettable(namespace)) then
+            return nil, "legacy getter missing (namespaced candidate protected)"
+        end
+        if type(namespace) == "table" then
+            local ok, candidate = pcall(function() return namespace[candidateName] end)
+            if not ok then
+                return nil, "legacy getter missing (namespaced candidate inaccessible)"
+            end
+            if isSecret(candidate) then
+                return nil, "legacy getter missing (namespaced candidate protected)"
+            end
+            if type(candidate) == "function" then
+                return nil, "legacy getter missing (namespaced candidate present)"
+            end
+        end
+        return nil, "legacy getter missing (namespaced candidate absent)"
+    end
     return api
 end
 
@@ -329,17 +347,17 @@ local function questRecordSummary()
     if rows == "protected" or rows == "unavailable" then return rows end
     local count = tonumber(rows)
     if count > 128 then return "over limit" end
-    local read, reason = progressionRecordMethod(GetQuestLogTitle)
+    local read, reason = progressionRecordMethod(GetQuestLogTitle, C_QuestLog, "GetInfo")
     if not read then return reason end
     local leaves = 0
     for index = 1, count do
         local ok, _, _, _, header, _, _, _, questId = pcall(read, index)
-        if not ok then return "unavailable" end
+        if not ok then return "getter call failed" end
         if isSecret(header) or isSecret(questId) then return "protected" end
-        if type(header) ~= "boolean" then return "unavailable" end
+        if type(header) ~= "boolean" then return "header flag invalid" end
         if not header then
             if not positiveInteger(questId) or questId > 2147483647 then
-                return "unavailable"
+                return "quest ID invalid"
             end
             leaves = leaves + 1
         end
@@ -352,26 +370,31 @@ local function factionRecordSummary()
     if rows == "protected" or rows == "unavailable" then return rows end
     local count = tonumber(rows)
     if count > 256 then return "over limit" end
-    local read, reason = progressionRecordMethod(GetFactionInfo)
+    local read, reason = progressionRecordMethod(GetFactionInfo, C_Reputation,
+        "GetFactionDataByIndex")
     if not read then return reason end
     local leaves = 0
     for index = 1, count do
         local ok, _, _, standing, barMin, barMax, barValue, _, _, header,
             _, _, _, _, factionId = pcall(read, index)
-        if not ok then return "unavailable" end
+        if not ok then return "getter call failed" end
         if isSecret(header) or isSecret(factionId) or isSecret(standing) or
             isSecret(barMin) or isSecret(barMax) or isSecret(barValue) then
             return "protected"
         end
-        if type(header) ~= "boolean" then return "unavailable" end
+        if type(header) ~= "boolean" then return "header flag invalid" end
         if not header then
-            if not positiveInteger(factionId) or factionId > 2147483647 or
-                not positiveInteger(standing) or standing > 16 or
-                not boundedStandingValue(barMin) or
+            if not positiveInteger(factionId) or factionId > 2147483647 then
+                return "faction ID invalid"
+            end
+            if not positiveInteger(standing) or standing > 16 then
+                return "standing invalid"
+            end
+            if not boundedStandingValue(barMin) or
                 not boundedStandingValue(barMax) or
                 not boundedStandingValue(barValue) or barMin >= barMax or
                 barValue < barMin or barValue > barMax then
-                return "unavailable"
+                return "bar values invalid"
             end
             leaves = leaves + 1
         end
