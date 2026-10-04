@@ -14,7 +14,7 @@ A **synthetic, test-only** schema-2 file with two own-bank item pages is availab
 
 **Bank test in progress:** on the next live bank-opening attempt, the UI reported `Bank: Capture unavailable: client refused the bank scan` and `Items: Capture unavailable: no complete cached item scan`. These are generic refusal statuses, not a diagnosed cause or evidence that the already saved bag details were erased. The player had not used **Bank (Manual)**; that command is not required for automatic capture. The next test is to select the **character-bank tab/page in the game's bank UI**, out of combat, then recheck both statuses before saving; the first opening event may precede an active own-bank view.
 
-**Bank follow-up (player-reported):** clicking the bank's bag-icon tab changed the **Bank** status to `Captured in memory; disk update waits for logout or /reload`. This establishes a successful in-memory bank-total scan after the initial refusal, not a disk write, changed totals, or successful bank-item metadata capture. The Items status is still awaiting confirmation.
+**Bank follow-up (player-reported):** clicking the bank's bag-icon tab changed **Bank** to `Captured in memory; disk update waits for logout or /reload`. After the player moved one item from a bag into the bank, **Items** also reported capture in memory. These UI statuses establish that the bank and item handlers ran, not which item source most recently set the shared Items status, a disk write, or website parity. Leave the game to save normally before a stopped-game, marker-only check for a bank-source item payload.
 
 ## Use
 
