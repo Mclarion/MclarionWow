@@ -26,7 +26,7 @@ The player reported a real schema-2 website round trip with bag and bank metadat
 
 ## Local validation
 
-Run from this directory: `(cd tests && lua5.4 test_mclarion_wow.lua)`. The 0.11.2 Lua mock suite passes 281 assertions, including zero-slot and all-nil transient scan refusals, explicit empty confirmation, existing capture paths, schema bounds and minimap behavior. Paired synthetic schema-2 fixture tests cover implicit and explicit bank arrays; fixtures are fake test data, **not** production account uploads. The player confirmed the 0.11.0 minimap icon is present and clickable in game. An installed 0.11.2 screenshot confirms the buttons and three scanned statuses; the player later reported Bank scanned in game. A new disk save and bank-category import remain unverified.
+Run from this directory: `(cd tests && lua5.4 test_mclarion_wow.lua)`. The 0.11.2 Lua mock suite passes 281 assertions, including zero-slot and all-nil transient scan refusals, explicit empty confirmation, existing capture paths, schema bounds and minimap behavior. Paired synthetic schema-2 fixture tests cover implicit and explicit bank arrays; fixtures are fake test data, **not** production account uploads. The player confirmed the 0.11.0 minimap icon is present and clickable in game. An installed 0.11.2 screenshot confirms the buttons and three scanned statuses; the player later reported Bank scanned in game. The player subsequently reported /reload after the bank scan; no stopped-game readback of the new bank record or fresh bank-category import has been verified.
 
 ## Safety and later work
 
