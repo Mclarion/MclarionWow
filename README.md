@@ -1,6 +1,6 @@
 # MclarionWow
 
-Forever-only, read-only addon for the logged-in character. **0.11.2 is installed:** published code `eca6bab` was hash-verified on disk while WoW was stopped, with the previous 0.11.1 addon backed up. The four *capture-now* buttons remain without copy exports. The player reported that a subsequent scan restored an affected character's missing bag data in the client, but the cause of an earlier empty latest snapshot is unproven. This release refuses unavailable backpack/bank-tab slot views and prevents an automatic all-empty scan from replacing a previously populated bag/bank history. A player who has checked that inventory is genuinely empty can explicitly confirm it with `Bags now` or `Bank now`. SavedVariables schema and wire formats are unchanged; installed 0.11.2 behavior still needs an in-game check.
+Forever-only, read-only addon for the logged-in character. **0.11.2 is installed:** published code `eca6bab` was hash-verified on disk while WoW was stopped, with the previous 0.11.1 addon backed up. The four *capture-now* buttons remain without copy exports. The player reported that a subsequent scan restored an affected character's missing bag data in the client, but the cause of an earlier empty latest snapshot is unproven. This release refuses unavailable backpack/bank-tab slot views and prevents an automatic all-empty scan from replacing a previously populated bag/bank history. A player who has checked that inventory is genuinely empty can explicitly confirm it with `Bags now` or `Bank now`. SavedVariables schema and wire formats are unchanged. A player screenshot confirms four buttons visible; Character/Bags/Items show scanned statuses, while Bank reports no scan because the character-bank tab was not active. This is in-memory UI evidence, not a new disk save or import.
 
 ## Use the game-written file
 
@@ -26,7 +26,7 @@ The player reported a real schema-2 website round trip with bag and bank metadat
 
 ## Local validation
 
-Run from this directory: `(cd tests && lua5.4 test_mclarion_wow.lua)`. The 0.11.2 Lua mock suite passes 281 assertions, including zero-slot and all-nil transient scan refusals, explicit empty confirmation, existing capture paths, schema bounds and minimap behavior. Paired synthetic schema-2 fixture tests cover implicit and explicit bank arrays; fixtures are fake test data, **not** production account uploads. The player confirmed the 0.11.0 minimap icon is present and clickable in game. An installed 0.11.2 UI/capture check is still pending.
+Run from this directory: `(cd tests && lua5.4 test_mclarion_wow.lua)`. The 0.11.2 Lua mock suite passes 281 assertions, including zero-slot and all-nil transient scan refusals, explicit empty confirmation, existing capture paths, schema bounds and minimap behavior. Paired synthetic schema-2 fixture tests cover implicit and explicit bank arrays; fixtures are fake test data, **not** production account uploads. The player confirmed the 0.11.0 minimap icon is present and clickable in game. An installed 0.11.2 screenshot confirms the buttons and three scanned statuses, but not a bank scan or a new disk save.
 
 ## Safety and later work
 

@@ -1,13 +1,13 @@
 # MclarionWow handoff TODO — 2026-10-04
 
-**0.11.2 installed (`eca6bab`):** A player-reported subsequent scan restored the affected character's bag display. Earlier imported payloads contained a populated snapshot followed by an empty latest snapshot; the source of the empty scan remains unproven. Regression tests reproduce a failure mode in 0.11.1: zero/uninitialized bag or bank views, or transient all-nil item reads, could append an empty state over a known populated one. Release guards preserve history for automatic scans and let a player explicitly confirm genuine emptiness after inspecting the visible bags/bank. No schema or wire changes; 281 mocked assertions pass. WoW was stopped during installation; a separate readback verified installed version/hashes and a recoverable 0.11.1 backup. Live 0.11.2 behavior remains unverified.
+**0.11.2 installed (`eca6bab`):** A player-reported subsequent scan restored the affected character's bag display. Earlier imported payloads contained a populated snapshot followed by an empty latest snapshot; the source of the empty scan remains unproven. Regression tests reproduce a failure mode in 0.11.1: zero/uninitialized bag or bank views, or transient all-nil item reads, could append an empty state over a known populated one. Release guards preserve history for automatic scans and let a player explicitly confirm genuine emptiness after inspecting the visible bags/bank. No schema or wire changes; 281 mocked assertions pass. WoW was stopped during installation; a separate readback verified installed version/hashes and a recoverable 0.11.1 backup. The player reports the four buttons present and tried; a screenshot shows Character/Bags/Items scanned, while Bank says to select the character-bank tab. This does not verify a saved disk update or bank capture.
 
 ## 0.11.2 safety release checks
 
 - [x] Add red/green mocked regressions for zero-slot and all-nil bag/bank views plus explicit confirmation of genuine empty inventories.
 - [x] Lua syntax, 281-assertion mock suite, both synthetic bank fixtures and diff checks passed; publish only audited addon files and handoff.
 - [x] Installed while WoW was stopped, backed up 0.11.1, and independently read back matching version and hashes. No game-written SavedVariables were touched.
-- [ ] Ask for one in-game status check; do not assert the empty-snapshot cause or an in-game fix from mocks.
+- [x] Player screenshot confirms four buttons, five enabled switches and Character/Bags/Items scanned statuses. Bank reports no scan because the character-bank tab is inactive; a live bank capture and disk save remain unverified. Do not assert the earlier empty-snapshot cause.
 
 **0.11.1 release history:** the player clarified that the missing buttons should be **capture-now controls**, not restored clipboard exports. Code `d7507b9` added four buttons that reuse validated scanners while preserving schema and opt-ins. WoW was stopped during installation; a separate readback verified both installed hashes and a recoverable 0.11.0 backup. The menu need not stay open, loot/bag updates rescan automatically, unchanged item totals deduplicate, and own-bank opening rescans only when the character-bank tab is already active. Mock tests passed 264 assertions and both synthetic bank fixtures.
 
@@ -17,7 +17,7 @@
 - [x] Exercise automatic bag updates with the addon menu closed; prove unchanged totals deduplicate and account-bank views cannot be scanned.
 - [x] Published and installed while WoW was stopped; the 0.11.0 code backup and installed Lua/TOC hashes were verified by readback. No game-written SavedVariables were touched.
 - [x] Refreshed and hash-verified `B:\MclarionWow-Data-README.md` from the published `DATA_STORAGE.md` over the Windows LAN endpoint; backed up the prior handoff. The alternate routed endpoint had timed out. The local root and public docs are synchronized.
-- [ ] Ask the player for one live 0.11.1 UI/capture check; do not claim screenshot layout or in-game button behavior from Lua mocks alone.
+- [ ] Version 0.11.1 was not separately observed in game; its UI check is superseded by the partial player-reported 0.11.2 screenshot.
 
 ## 0.11.0 completed (installed)
 
