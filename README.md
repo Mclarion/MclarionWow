@@ -8,7 +8,7 @@ For the exact storage lifecycle, `MclarionWowData` keys, capture triggers, manua
 
 **Next one-file workflow (planned, not installed):** extend the same game-written account SavedVariables file to include bounded, opt-in item names/details now available only through `MHWOWI1` clipboard exports. The proposed schema-2 `items[guid]` contract, compatibility order, and 4 MB website-upload constraint are in [DATA_STORAGE.md](DATA_STORAGE.md#planned-one-file-item-detail-contract-not-released). Bag and character-bank numeric totals are already captured in schema 1. The website must accept both schemas **before** an updated addon writes schema 2. Keep clipboard commands as fallback until a real file-save/upload round trip proves parity; combat logs remain separate. The website still requires the player's deliberate file selection, and any desktop EXE reader is separate policy-gated work.
 
-A **synthetic, test-only** schema-2 file is available at [`tests/schema2-synthetic.lua`](tests/schema2-synthetic.lua) for parallel reader development. It is not a player save: never upload it to a production account.
+A **synthetic, test-only** schema-2 file with two own-bank item pages is available at [`tests/schema2-synthetic.lua`](tests/schema2-synthetic.lua), with a fixture check in `tests/test_schema2_fixture.lua`, for parallel reader development. It is not a player save: never upload it to a production account.
 
 ## Use
 
