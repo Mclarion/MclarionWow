@@ -201,7 +201,7 @@ function MclarionWow_BuildIdentityExport()
     return result, nil, guid
 end
 
--- Shared, fail-closed scanner for the diagnostic and manual bag export.
+-- Shared, fail-closed scanner for diagnostics and automatic bag capture.
 local function scanBags(collectTotals)
     local combat, combatError = combatStatus()
     if combat == nil then return nil, combatError end
@@ -410,7 +410,7 @@ local function scanCharacterBank(collectTotals)
     return result
 end
 
--- Manual count-only diagnostic for purchased tabs in the character's own viewable bank.
+-- Count-only diagnostic for purchased tabs in the character's own viewable bank.
 -- Only aggregate counts leave this function; item IDs, per-item counts and snapshots do not.
 function MclarionWow_ProbeBank()
     local result, err = scanCharacterBank(false)
@@ -424,7 +424,7 @@ function MclarionWow_ProbeBank()
         result.tabCount, result.slotsTotal, result.occupied, result.distinct)
 end
 
--- Manual-only export of item totals from purchased tabs in the character's own
+-- Builder for item totals from purchased tabs in the character's own
 -- currently viewable bank. Nothing from this scan is written to SavedVariables.
 function MclarionWow_BuildBankExport()
     local result, scanError = scanCharacterBank(true)
@@ -503,7 +503,7 @@ function MclarionWow_BuildBagExport()
     return export, nil, guid
 end
 
--- A separate, manually reviewed catalogue for the player's own observed IDs.
+-- Bounded metadata for the player's own observed IDs.
 -- Text is hex-encoded so item links/descriptions cannot alter the wire format.
 local function itemText(value, maxBytes)
     if isSecret(value) or type(value) ~= "string" or #value > maxBytes or
@@ -974,29 +974,17 @@ local function saveItemMetadata(guid, source, payload)
     return true
 end
 
-local window
-local exportBox, windowTitle, windowInstructions
-local displayedExport
-local settingsWindow, combatStatusLabel, bagStatusLabel, bankStatusLabel, itemStatusLabel, exportStatusLabel
+local settingsWindow, combatStatusLabel, bagStatusLabel, bankStatusLabel, itemStatusLabel
 local combatMessage = "Waiting for the next login."
 local bagMessage = "No bag capture this session."
 local bankMessage = "No own-bank capture this session."
 local itemMessage = "Off; enable item details to capture cached names."
-local exportMessage = "No copy window opened this session."
 
 local function refreshSettingsStatus()
     if combatStatusLabel then combatStatusLabel:SetText("Combat log: " .. combatMessage) end
     if bagStatusLabel then bagStatusLabel:SetText("Bags: " .. bagMessage) end
     if bankStatusLabel then bankStatusLabel:SetText("Bank: " .. bankMessage) end
     if itemStatusLabel then itemStatusLabel:SetText("Items: " .. itemMessage) end
-    if exportStatusLabel then exportStatusLabel:SetText("Export: " .. exportMessage) end
-end
-
-local function recordExport(label, saved)
-    exportMessage = label .. (saved and
-        " snapshot stored in memory; WoW saves it later. No separate TXT file." or
-        " copy window opened; no separate TXT file was written.")
-    refreshSettingsStatus()
 end
 
 local function reportLoggingAfterOptOut()
@@ -1035,7 +1023,7 @@ end
 
 local function createSettingsWindow()
     settingsWindow = CreateFrame("Frame", "MclarionWowSettingsFrame", UIParent, "BasicFrameTemplateWithInset")
-    settingsWindow:SetSize(490, 480)
+    settingsWindow:SetSize(490, 430)
     settingsWindow:SetPoint("CENTER")
     settingsWindow:SetFrameStrata("DIALOG")
     settingsWindow:SetMovable(true)
@@ -1093,23 +1081,10 @@ local function createSettingsWindow()
     bankStatusLabel:SetPoint("TOPLEFT", 18, -275)
     itemStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     itemStatusLabel:SetPoint("TOPLEFT", 18, -297)
-    exportStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    exportStatusLabel:SetPoint("TOPLEFT", 18, -319)
     refreshSettingsStatus()
-
-    local function exportButton(label, x, callback)
-        local button = CreateFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
-        button:SetSize(140, 25)
-        button:SetPoint("TOPLEFT", x, -350)
-        button:SetText(label)
-        button:SetScript("OnClick", callback)
-    end
-    exportButton("Character", 18, function() SlashCmdList.MCLARIONWOW() end)
-    exportButton("Bags", 170, function() SlashCmdList.MCLARIONWOWBAGSEXPORT() end)
-    exportButton("Bank (manual)", 322, function() SlashCmdList.MCLARIONWOWBANKSEXPORT() end)
     local stopButton = CreateFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
     stopButton:SetSize(175, 25)
-    stopButton:SetPoint("TOPLEFT", 18, -382)
+    stopButton:SetPoint("TOPLEFT", 18, -335)
     stopButton:SetText("Stop logging now")
     stopButton:SetScript("OnClick", function()
         local current = settingsRoot()
@@ -1123,108 +1098,12 @@ local function createSettingsWindow()
         stopLoggingNow()
     end)
     local footer = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    footer:SetPoint("TOPLEFT", 18, -420)
+    footer:SetPoint("TOPLEFT", 18, -375)
     footer:SetText("Stop logging now may end logging started outside this addon.")
     local saveNote = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    saveNote:SetPoint("TOPLEFT", 18, -442)
+    saveNote:SetPoint("TOPLEFT", 18, -397)
     saveNote:SetText("Item details save after opt-in; WoW controls disk writes.")
     settingsWindow:Hide()
-end
-
-local function setExportText(text)
-    displayedExport = text
-    exportBox:SetText(text)
-end
-
-local function createWindow()
-    window = CreateFrame("Frame", "MclarionWowExportFrame", UIParent, "BasicFrameTemplateWithInset")
-    window:SetSize(760, 210)
-    window:SetPoint("CENTER")
-    window:SetFrameStrata("DIALOG")
-    window:SetMovable(true)
-    window:EnableMouse(true)
-    window:RegisterForDrag("LeftButton")
-    window:SetScript("OnDragStart", window.StartMoving)
-    window:SetScript("OnDragStop", window.StopMovingOrSizing)
-
-    windowTitle = window:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    windowTitle:SetPoint("TOPLEFT", 12, -8)
-    windowTitle:SetText("MclarionWow — manual snapshot export")
-
-    windowInstructions = window:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    windowInstructions:SetPoint("TOPLEFT", 16, -38)
-    windowInstructions:SetText("The text below is selected. Press Ctrl+C, then paste it where you choose.")
-
-    exportBox = CreateFrame("EditBox", "MclarionWowExportEditBox", window, "InputBoxTemplate")
-    exportBox:SetPoint("TOPLEFT", 18, -68)
-    exportBox:SetPoint("BOTTOMRIGHT", -18, 22)
-    exportBox:SetAutoFocus(false)
-    exportBox:SetMultiLine(true)
-    exportBox:SetFontObject(ChatFontNormal)
-    exportBox:SetTextInsets(8, 8, 8, 8)
-    exportBox:SetScript("OnTextChanged", function(self, userInput)
-        if userInput and displayedExport then
-            -- Typing with the export selected would replace part of a valid payload.
-            self:SetText(displayedExport)
-            self:HighlightText()
-        end
-    end)
-    exportBox:SetScript("OnEscapePressed", function(self)
-        self:ClearFocus()
-        window:Hide()
-    end)
-
-    window:Hide()
-end
-
-local function setWindowMode(bankDiagnostic)
-    if not window then createWindow() end
-    windowTitle:SetText(bankDiagnostic and "MclarionWow — Bank diagnostic (counts only)" or
-        "MclarionWow — manual snapshot export")
-    windowInstructions:SetText(bankDiagnostic and
-        "Only aggregate counts are shown. Opted-in item details save separately on an own-bank scan." or
-        "The text below is selected. Press Ctrl+C, then paste it where you choose.")
-end
-
-local function showExport()
-    setWindowMode(false)
-
-    local ok, export, err, guid = pcall(MclarionWow_BuildExport)
-    if ok and export then
-        local savedOk, stored, storageError = pcall(saveSnapshot, guid, export)
-        if savedOk and stored then recordExport("Character", true) end
-        setExportText(savedOk and stored and export or "Storage unavailable: " ..
-            (savedOk and (storageError or "unknown error") or "client refused to save."))
-    else
-        setExportText("Export unavailable: " ..
-            (ok and (err or "unknown error") or "client refused the scan."))
-    end
-    window:Show()
-    exportBox:Show()
-    exportBox:SetFocus()
-    exportBox:HighlightText()
-end
-
-SLASH_MCLARIONWOW1 = "/mhwow"
-SlashCmdList.MCLARIONWOW = showExport
-
-SLASH_MCLARIONWOWIDENTITY1 = "/mhwowidentity"
-SlashCmdList.MCLARIONWOWIDENTITY = function()
-    setWindowMode(false)
-    local ok, export, err, guid = pcall(MclarionWow_BuildIdentityExport)
-    if ok and export then
-        local savedOk, stored, storageError = pcall(saveSnapshot, guid, export)
-        if savedOk and stored then recordExport("Character identity", true) end
-        setExportText(savedOk and stored and export or "Storage unavailable: " ..
-            (savedOk and (storageError or "unknown error") or "client refused to save."))
-    else
-        setExportText("Identity export unavailable: " ..
-            (ok and (err or "unknown error") or "client refused the scan."))
-    end
-    window:Show()
-    exportBox:Show()
-    exportBox:SetFocus()
-    exportBox:HighlightText()
 end
 
 SLASH_MCLARIONWOWUI1 = "/mhwowui"
@@ -1234,42 +1113,22 @@ SlashCmdList.MCLARIONWOWUI = function()
     settingsWindow:Show()
 end
 
-local function showBagExport()
-    setWindowMode(false)
-    local ok, export, err, guid = pcall(MclarionWow_BuildBagExport)
-    if ok and export then
-        local savedOk, stored, storageError = pcall(saveBagSnapshot, guid, export)
-        if savedOk and stored then
-            recordExport("Bags", true)
-            setExportText(export)
+-- Keep the settings reachable without typing a command. The minimap may not
+-- exist in stripped-down clients, in which case /mhwowui remains available.
+if not isSecret(Minimap) and type(Minimap) == "table" and not issecrettable(Minimap) then
+    local button = CreateFrame("Button", "MclarionWowMinimapButton", Minimap)
+    button:SetSize(30, 30)
+    button:SetPoint("BOTTOMLEFT", Minimap, "BOTTOMLEFT", -8, -8)
+    button:SetFrameStrata("MEDIUM")
+    button:SetNormalTexture("Interface\\Icons\\INV_Misc_Map_01")
+    button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+    button:SetScript("OnClick", function()
+        if settingsWindow and settingsWindow:IsShown() then
+            settingsWindow:Hide()
         else
-            setExportText("Storage unavailable: " ..
-                (savedOk and (storageError or "unknown error") or "client refused to save."))
+            SlashCmdList.MCLARIONWOWUI()
         end
-    else
-        setExportText("Bag export unavailable: " ..
-            (ok and (err or "unknown error") or "client refused the scan."))
-    end
-    window:Show()
-    exportBox:Show()
-    exportBox:SetFocus()
-    exportBox:HighlightText()
-end
-
-SLASH_MCLARIONWOWBAGSEXPORT1 = "/mhwowbagsexport"
-SlashCmdList.MCLARIONWOWBAGSEXPORT = showBagExport
-
-SLASH_MCLARIONWOWITEMSEXPORT1 = "/mhwowitemsexport"
-SlashCmdList.MCLARIONWOWITEMSEXPORT = function()
-    setWindowMode(false)
-    local ok, export, err = pcall(MclarionWow_BuildItemExport)
-    if ok and export then recordExport("Bag and gear details") end
-    setExportText(ok and (export or "Item export unavailable: " .. (err or "unknown error")) or
-        "Item export unavailable: client refused the scan.")
-    window:Show()
-    exportBox:Show()
-    exportBox:SetFocus()
-    exportBox:HighlightText()
+    end)
 end
 
 SLASH_MCLARIONWOWBAGS1 = "/mhwowbags"
@@ -1281,70 +1140,7 @@ end
 SLASH_MCLARIONWOWBANKPROBE1 = "/mhwowbankprobe"
 SlashCmdList.MCLARIONWOWBANKPROBE = function()
     local ok, report, err = pcall(MclarionWow_ProbeBank)
-    setWindowMode(true)
-    setExportText(ok and (report or "Bank probe unavailable: " .. (err or "unknown error")) or
-        "Bank probe unavailable: client refused the scan.")
-    window:Show()
-    exportBox:Show()
-    exportBox:SetFocus()
-    exportBox:HighlightText()
-end
-
-SLASH_MCLARIONWOWBANKSEXPORT1 = "/mhwowbanksexport"
-SlashCmdList.MCLARIONWOWBANKSEXPORT = function()
-    local ok, export, err = pcall(MclarionWow_BuildBankExport)
-    if ok and export then recordExport("Bank (manual)") end
-    if not window then createWindow() end
-    windowTitle:SetText("MclarionWow — Bank totals (manual copy)")
-    windowInstructions:SetText(
-        "Copy numeric totals with Ctrl+C. Opted-in item details save separately on an own-bank scan.")
-    setExportText(ok and (export or "Bank export unavailable: " .. (err or "unknown error")) or
-        "Bank export unavailable: client refused the scan.")
-    window:Show()
-    exportBox:Show()
-    exportBox:SetFocus()
-    exportBox:HighlightText()
-end
-
-local function parseBankItemPage(message)
-    if isSecret(message) then return nil, "Bank metadata page is protected by the client." end
-    if message == nil or message == "" or (type(message) == "string" and message:match("^%s*$")) then
-        return 1
-    end
-    if type(message) ~= "string" then return nil, "Bank metadata page is invalid." end
-    local digits = message:match("^%s*(%d+)%s*$")
-    local page = digits and tonumber(digits) or nil
-    if not positiveInteger(page) or page > 9 then
-        return nil, "Bank metadata page must be an integer from 1 to 9."
-    end
-    return page
-end
-
-SLASH_MCLARIONWOWBANKITEMSEXPORT1 = "/mhwowbankitemsexport"
-SlashCmdList.MCLARIONWOWBANKITEMSEXPORT = function(message)
-    if not window then createWindow() end
-    windowTitle:SetText("MclarionWow — Bank item metadata (manual only)")
-    windowInstructions:SetText(
-        "Review MHWOWI1 before copying. Use /mhwowbankitemsexport 2 for the next page when shown.")
-    local page, pageError = parseBankItemPage(message)
-    if not page then
-        setExportText("Bank item metadata export unavailable: " .. pageError)
-    else
-        local ok, export, err, _, selectedPage, pageCount = pcall(MclarionWow_BuildBankItemExport, page)
-        if ok and export then
-            recordExport("Bank details (manual)")
-            windowTitle:SetText(string.format(
-                "MclarionWow — Bank item metadata (manual only, page %d/%d)", selectedPage, pageCount))
-            setExportText(export)
-        else
-            setExportText("Bank item metadata export unavailable: " ..
-                (ok and (err or "unknown error") or "client refused the scan."))
-        end
-    end
-    window:Show()
-    exportBox:Show()
-    exportBox:SetFocus()
-    exportBox:HighlightText()
+    print("MclarionWow: " .. (ok and (report or err) or "Bank probe unavailable."))
 end
 
 local captureFrame = CreateFrame("Frame")
@@ -1431,7 +1227,7 @@ local function captureBankLocally()
     local combat = combatStatus()
     if combat == nil or combat then return end
     -- The shared scanner rejects hidden/account-bank views and protected APIs
-    -- before any slot is read, for automatic and manual paths alike.
+    -- before any slot is read for automatic capture.
     local ok, export, _, guid = pcall(MclarionWow_BuildBankExport)
     if ok and export and guid then
         local saved, stored = pcall(saveBankSnapshot, guid, export)

@@ -95,6 +95,7 @@ _G.C_Bank = {
 
 local frames = {}
 _G.UIParent = {}
+_G.Minimap = {}
 _G.SlashCmdList = {}
 _G.CreateFrame = function(frameType, name, parent, template)
     local frame = {
@@ -135,6 +136,8 @@ _G.CreateFrame = function(frameType, name, parent, template)
     function frame:SetNormalFontObject() end
     function frame:SetHighlightFontObject() end
     function frame:SetPushedTextOffset() end
+    function frame:SetNormalTexture(texture) self.normalTexture = texture end
+    function frame:SetHighlightTexture(texture) self.highlightTexture = texture end
     function frame:CreateFontString()
         local fontString = {}
         function fontString:SetPoint() end
@@ -158,6 +161,19 @@ if not chunk then
     os.exit(1)
 end
 chunk("MclarionWow", {})
+
+local minimapButton
+for _, frame in ipairs(frames) do
+    if frame.name == "MclarionWowMinimapButton" then minimapButton = frame end
+end
+expectTrue(minimapButton and minimapButton.parent == Minimap and
+    minimapButton.frameType == "Button" and type(minimapButton.scripts.OnClick) == "function",
+    "a clickable icon is attached to the minimap")
+for _, command in ipairs({ "MCLARIONWOW", "MCLARIONWOWIDENTITY", "MCLARIONWOWBAGSEXPORT",
+    "MCLARIONWOWITEMSEXPORT", "MCLARIONWOWBANKSEXPORT", "MCLARIONWOWBANKITEMSEXPORT" }) do
+    expectEqual(SlashCmdList[command], nil, "manual copy command " .. command .. " is retired")
+end
+expectEqual(_G.MclarionWowExportFrame, nil, "manual export window is not created")
 
 expectTrue(type(MclarionWow_BuildExport) == "function", "exports a testable snapshot builder")
 
@@ -336,30 +352,12 @@ if type(MclarionWow_ProbeBank) == "function" then
         report:find("1 distinct", 1, true) and not report:find("4242", 1, true),
         "bank probe reports bounded counts without any item IDs")
     expectTrue(sameData(MclarionWowData, expectedStorage), "bank probe leaves nested saved data unchanged")
-    expectTrue(type(SlashCmdList.MCLARIONWOWBANKPROBE) == "function", "registers manual bank probe command")
+    expectTrue(type(SlashCmdList.MCLARIONWOWBANKPROBE) == "function", "bank count diagnostic remains available")
     SlashCmdList.MCLARIONWOWBANKPROBE()
-    local bankBox, bankWindow
-    for _, frame in ipairs(frames) do
-        if frame.frameType == "EditBox" then bankBox = frame end
-        if frame.name == "MclarionWowExportFrame" then bankWindow = frame end
-    end
-    expectTrue(bankBox and bankWindow and bankWindow.shown and bankBox.focused and bankBox.highlighted,
-        "bank count report opens a selectable popup")
-    expectEqual(bankBox and bankBox:GetText(), report, "bank popup contains only the count report")
-    expectTrue(bankWindow and bankWindow.fontStrings[1].text:find("Bank diagnostic", 1, true) ~= nil,
-        "bank popup identifies the count-only diagnostic")
-    expectTrue(bankWindow and bankWindow.fontStrings[2].text:find("Opted-in item details", 1, true) ~= nil,
-        "bank diagnostic does not falsely claim item details are never saved")
-    expectTrue(sameData(MclarionWowData, expectedStorage), "bank popup leaves nested saved data unchanged")
-    bankWindow:Hide()
-    SlashCmdList.MCLARIONWOWBANKPROBE()
-    expectTrue(bankWindow.shown, "a second manual bank probe reopens a hidden copy-data popup")
+    expectTrue(sameData(MclarionWowData, expectedStorage), "bank diagnostic never writes data")
     inCombat = true
     report, problem = MclarionWow_ProbeBank()
     expectTrue(report == nil and problem:find("combat", 1, true) ~= nil, "bank probe refuses combat")
-    SlashCmdList.MCLARIONWOWBANKPROBE()
-    expectTrue(bankBox and bankBox:GetText():find("unavailable", 1, true) ~= nil,
-        "bank popup shows a refusal rather than stale counts during combat")
     inCombat = false
     local oldCombat = InCombatLockdown
     _G.InCombatLockdown = nil
@@ -565,36 +563,6 @@ if type(MclarionWow_BuildBankExport) == "function" then
     _G.GetServerTime = oldTime
     secretValues[protectedTimeApi] = nil
 
-    expectEqual(SLASH_MCLARIONWOWBANKSEXPORT1, "/mhwowbanksexport",
-        "registers the exact bank export slash command")
-    expectTrue(type(SlashCmdList.MCLARIONWOWBANKSEXPORT) == "function",
-        "registers the manual-only character-bank export command")
-    C_Bank.FetchPurchasedBankTabData = function() return { { ID = 6 } } end
-    C_Container.GetContainerNumSlots = function() return 1 end
-    C_Container.GetContainerItemInfo = function() return { itemID = 4242, stackCount = 3 } end
-    SlashCmdList.MCLARIONWOWBANKSEXPORT()
-    local bankBox, bankWindow
-    for _, frame in ipairs(frames) do
-        if frame.frameType == "EditBox" then bankBox = frame end
-        if frame.name == "MclarionWowExportFrame" then bankWindow = frame end
-    end
-    expectEqual(bankBox and bankBox:GetText(),
-        "MHWOWK1|forever|1720000000|Player-1234-ABCDEF12|6:4242:3|70170",
-        "manual bank command shows the exact selectable export")
-    expectTrue(bankWindow and bankWindow.shown and bankBox.focused and bankBox.highlighted,
-        "manual bank export opens and selects the copy box")
-    expectTrue(bankWindow and bankWindow.fontStrings[1].text:find("Bank totals", 1, true) ~= nil and
-        bankWindow.fontStrings[2].text:find("Opted-in item details", 1, true) ~= nil,
-        "manual bank totals are distinguished from opted-in item detail capture")
-    expectTrue(sameData(MclarionWowData, expectedStorage),
-        "manual bank export never writes SavedVariables")
-    inCombat = true
-    SlashCmdList.MCLARIONWOWBANKSEXPORT()
-    expectTrue(bankBox and bankBox:GetText():find("unavailable", 1, true) ~= nil and
-        bankBox:GetText():find("MHWOWK1", 1, true) == nil,
-        "manual bank command replaces stale export text with combat refusal")
-    inCombat = false
-
     C_Bank.FetchPurchasedBankTabData = oldTabs
     C_Container.GetContainerNumSlots = oldSlots
     C_Container.GetContainerItemInfo = oldInfo
@@ -677,31 +645,6 @@ if type(MclarionWow_BuildBankItemExport) == "function" then
     expectTrue(safe and export == nil and exportError:find("protected", 1, true) ~= nil,
         "bank metadata refuses protected item metadata")
     secretValues[protected] = nil
-
-    expectEqual(SLASH_MCLARIONWOWBANKITEMSEXPORT1, "/mhwowbankitemsexport",
-        "registers the exact manual bank metadata command")
-    expectTrue(type(SlashCmdList.MCLARIONWOWBANKITEMSEXPORT) == "function",
-        "registers the manual-only bank metadata handler")
-    C_Item.GetItemInfo = oldItemInfo
-    C_Container.GetContainerNumSlots = function() return 1 end
-    C_Container.GetContainerItemInfo = function() return { itemID = 4242, stackCount = 1 } end
-    SlashCmdList.MCLARIONWOWBANKITEMSEXPORT("")
-    local bankBox, bankWindow
-    for _, frame in ipairs(frames) do
-        if frame.frameType == "EditBox" then bankBox = frame end
-        if frame.name == "MclarionWowExportFrame" then bankWindow = frame end
-    end
-    expectTrue(bankBox and bankBox:GetText():find("MHWOWI1|forever|", 1, true) == 1,
-        "manual bank metadata command shows a selectable MHWOWI1 export")
-    C_Bank.CanViewBank = function() return false end
-    SlashCmdList.MCLARIONWOWBANKITEMSEXPORT("")
-    expectTrue(bankBox and bankBox:GetText():find("unavailable", 1, true) ~= nil and
-        bankBox:GetText():find("MHWOWI1", 1, true) == nil,
-        "closed-bank refusal replaces stale bank metadata text")
-    expectTrue(bankWindow and bankWindow.fontStrings[1].text:find("Bank item metadata", 1, true) ~= nil,
-        "bank metadata popup is clearly identified")
-    expectTrue(sameData(MclarionWowData, expectedStorage),
-        "manual bank metadata handler leaves SavedVariables unchanged")
 
     C_Bank.FetchPurchasedBankTabData = oldTabs
     C_Bank.CanViewBank = oldView
@@ -939,320 +882,63 @@ export, err = MclarionWow_BuildExport()
 expectEqual(export, nil, "character GUID exceeding website bound is refused")
 _G.UnitGUID = function() return "Player-1234-ABCDEF12" end
 
-expectTrue(type(SLASH_MCLARIONWOW1) == "string", "registers a slash command")
-expectTrue(type(SlashCmdList.MCLARIONWOW) == "function", "slash command handler exists")
-SlashCmdList.MCLARIONWOW()
-local editBox
-for _, frame in ipairs(frames) do
-    if frame.frameType == "EditBox" then editBox = frame end
-end
-local function latestExportText()
-    for index = #frames, 1, -1 do
-        if frames[index].frameType == "EditBox" then return frames[index]:GetText() or "" end
-    end
-    return ""
-end
-expectTrue(editBox ~= nil and editBox.shown, "slash command shows selectable edit box")
-expectEqual(editBox:GetText(), expected, "slash command populates current export")
-expectTrue(editBox.highlighted, "slash command selects export for manual copy")
-editBox:SetText("corrupted by an accidental keypress")
-expectTrue(type(editBox.scripts.OnTextChanged) == "function",
-    "export popup guards against accidental edits")
-if type(editBox.scripts.OnTextChanged) == "function" then
-    editBox.scripts.OnTextChanged(editBox, true)
-    expectEqual(editBox:GetText(), expected, "popup restores the original export when typing replaces selection")
-    now = now + 1
-    SlashCmdList.MCLARIONWOW()
-    local refreshed = editBox:GetText()
-    expectTrue(refreshed ~= expected, "manual re-export replaces the popup with a fresh snapshot")
-    editBox:SetText("accidental edit after re-export")
-    editBox.scripts.OnTextChanged(editBox, true)
-    expectEqual(editBox:GetText(), refreshed, "popup restores the latest export rather than stale text")
-    now = now - 1
-    SlashCmdList.MCLARIONWOW()
-end
-for _, frame in ipairs(frames) do
-    if frame.name == "MclarionWowExportFrame" then
-        expectTrue(frame.fontStrings[1].text:find("manual snapshot export", 1, true) ~= nil,
-            "character export restores the popup title after a bank diagnostic")
-    end
-end
-
-local saved = MclarionWowData
-expectTrue(type(saved) == "table" and saved.schema == 1 and
-    type(saved.characters) == "table" and
-    type(saved.characters["Player-1234-ABCDEF12"]) == "table", "slash command saves a character snapshot locally")
-if type(saved) == "table" and type(saved.characters) == "table" and
-    type(saved.characters["Player-1234-ABCDEF12"]) == "table" then
-    local snapshots = saved.characters["Player-1234-ABCDEF12"]
-    expectEqual(snapshots[1], expected, "stored snapshot is the reviewed export")
-    SlashCmdList.MCLARIONWOW()
-    expectEqual(#snapshots, 1, "repeating an unchanged snapshot does not grow local storage")
-    for _ = 1, 22 do
-        now = now + 1
-        gear[1] = gear[1] + 1
-        SlashCmdList.MCLARIONWOW()
-    end
-    expectEqual(#snapshots, 20, "each character retains at most twenty snapshots")
-    expectTrue(snapshots[1]:find("|" .. tostring(now - 19) .. "|", 1, true) ~= nil,
-        "oldest local snapshots are pruned")
-    chunk("MclarionWow", {})
-    expectTrue(MclarionWowData == saved, "saved data survives addon reload")
-    SlashCmdList.MCLARIONWOW()
-    expectEqual(#snapshots, 20, "reloaded addon deduplicates current snapshot")
-    inCombat = true
-    SlashCmdList.MCLARIONWOW()
-    expectEqual(#snapshots, 20, "combat does not store data")
-    inCombat = false
-    MclarionWowData = { schema = 2, characters = {} }
-    local unsupported = MclarionWowData
-    SlashCmdList.MCLARIONWOW()
-    expectTrue(MclarionWowData == unsupported, "unknown storage schema is not overwritten")
-    local touchedCharacterStorage = false
-    local protectedStorage = setmetatable({}, { __index = function()
-        touchedCharacterStorage = true
-        error("protected character storage was indexed")
-    end })
-    secretTables[protectedStorage] = true
-    MclarionWowData = protectedStorage
-    local clean = pcall(SlashCmdList.MCLARIONWOW)
-    expectTrue(clean and not touchedCharacterStorage,
-        "character capture rejects protected saved data before indexing")
-    expectEqual(MclarionWowData, protectedStorage, "character capture preserves protected storage")
-    secretTables[protectedStorage] = nil
-    MclarionWowData = saved
-    local originalCharacters = saved.characters
-    saved.characters = protectedStorage
-    secretTables[protectedStorage] = true
-    touchedCharacterStorage = false
-    clean = pcall(SlashCmdList.MCLARIONWOW)
-    expectTrue(clean and not touchedCharacterStorage,
-        "character capture rejects protected character map before indexing")
-    saved.characters = originalCharacters
-    secretTables[protectedStorage] = nil
-    local previousHistory = originalCharacters["Player-1234-ABCDEF12"]
-    local protectedHistory = setmetatable({}, { __len = function()
-        touchedCharacterStorage = true
-        error("protected character history length was read")
-    end })
-    originalCharacters["Player-1234-ABCDEF12"] = protectedHistory
-    secretTables[protectedHistory] = true
-    touchedCharacterStorage = false
-    clean = pcall(SlashCmdList.MCLARIONWOW)
-    expectTrue(clean and not touchedCharacterStorage,
-        "character capture refuses protected history before reading length")
-    originalCharacters["Player-1234-ABCDEF12"] = previousHistory
-    secretTables[protectedHistory] = nil
-    local malformedHistory = setmetatable({}, { __len = function()
-        error("malformed character history")
-    end })
-    originalCharacters["Player-1234-ABCDEF12"] = malformedHistory
-    clean = pcall(SlashCmdList.MCLARIONWOW)
-    expectTrue(clean and latestExportText():find("Storage unavailable", 1, true) ~= nil,
-        "manual character export contains unexpected storage errors")
-    originalCharacters["Player-1234-ABCDEF12"] = previousHistory
-    local previousEntry = previousHistory[#previousHistory]
-    local protectedEntry = protectedSentinel()
-    secretValues[protectedEntry] = true
-    previousHistory[#previousHistory] = protectedEntry
-    clean = pcall(SlashCmdList.MCLARIONWOW)
-    expectTrue(clean and latestExportText():find("protected", 1, true) ~= nil,
-        "character capture refuses protected history entries")
-    previousHistory[#previousHistory] = previousEntry
-    secretValues[protectedEntry] = nil
-    local previousSchema = saved.schema
-    local protectedSchema = protectedSentinel()
-    secretValues[protectedSchema] = true
-    saved.schema = protectedSchema
-    clean = pcall(SlashCmdList.MCLARIONWOW)
-    expectTrue(clean and latestExportText():find("protected", 1, true) ~= nil,
-        "character capture checks protected storage schema before comparing")
-    saved.schema = previousSchema
-    secretValues[protectedSchema] = nil
-    local oversizedHistory = {}
-    for index = 1, 21 do oversizedHistory[index] = expected end
-    originalCharacters["Player-1234-ABCDEF12"] = oversizedHistory
-    clean = pcall(SlashCmdList.MCLARIONWOW)
-    expectTrue(clean and #oversizedHistory == 21 and
-        latestExportText():find("Storage unavailable", 1, true) ~= nil,
-        "oversized pre-existing character history is left unchanged")
-    local extraKeyHistory = { expected, unexpected = expected }
-    originalCharacters["Player-1234-ABCDEF12"] = extraKeyHistory
-    clean = pcall(SlashCmdList.MCLARIONWOW)
-    expectTrue(clean and #extraKeyHistory == 1 and extraKeyHistory[2] == nil and
-        latestExportText():find("Storage unavailable", 1, true) ~= nil,
-        "character history with an extra key is rejected unchanged")
-    local sparseHistory = { [1] = expected, [3] = expected }
-    originalCharacters["Player-1234-ABCDEF12"] = sparseHistory
-    clean = pcall(SlashCmdList.MCLARIONWOW)
-    expectTrue(clean and sparseHistory[2] == nil and sparseHistory[4] == nil and
-        latestExportText():find("Storage unavailable", 1, true) ~= nil,
-        "sparse character history is rejected unchanged")
-    local interiorHole = { [1] = expected, [2] = expected, [4] = expected }
-    originalCharacters["Player-1234-ABCDEF12"] = interiorHole
-    clean = pcall(SlashCmdList.MCLARIONWOW)
-    expectTrue(clean and interiorHole[3] == nil and interiorHole[5] == nil and
-        latestExportText():find("Storage unavailable", 1, true) ~= nil,
-        "interior character-history hole is rejected unchanged")
-    local extraProtectedValue = protectedSentinel()
-    secretValues[extraProtectedValue] = true
-    local protectedExtraHistory = { expected, unexpected = extraProtectedValue }
-    originalCharacters["Player-1234-ABCDEF12"] = protectedExtraHistory
-    clean = pcall(SlashCmdList.MCLARIONWOW)
-    expectTrue(clean and protectedExtraHistory[2] == nil and
-        latestExportText():find("protected", 1, true) ~= nil,
-        "protected extra character-history entry is checked before use")
-    secretValues[extraProtectedValue] = nil
-    local cappedHistory = {}
-    for index = 1, 20 do cappedHistory[index] = expected end
-    cappedHistory.unexpected = expected
-    originalCharacters["Player-1234-ABCDEF12"] = cappedHistory
-    clean = pcall(SlashCmdList.MCLARIONWOW)
-    expectTrue(clean and cappedHistory[20] == expected and
-        latestExportText():find("Storage unavailable", 1, true) ~= nil,
-        "full character history with an extra key cannot rotate")
-    originalCharacters["Player-1234-ABCDEF12"] = previousHistory
-end
-
-expectTrue(type(SlashCmdList.MCLARIONWOWBAGSEXPORT) == "function",
-    "registers a manual bag export command")
-if type(SlashCmdList.MCLARIONWOWBAGSEXPORT) == "function" then
-    local bagExport = MclarionWow_BuildBagExport()
-    SlashCmdList.MCLARIONWOWBAGSEXPORT()
-    local bagEditBox
+if minimapButton and minimapButton.scripts.OnClick then
+    minimapButton.scripts.OnClick(minimapButton)
+    local panel
     for _, frame in ipairs(frames) do
-        if frame.frameType == "EditBox" then bagEditBox = frame end
+        if frame.name == "MclarionWowSettingsFrame" then panel = frame end
     end
-    expectEqual(bagEditBox:GetText(), bagExport, "manual bag export is selectable for player review")
-    local bagHistory = MclarionWowData.bags["Player-1234-ABCDEF12"]
-    expectEqual(bagHistory[1], bagExport, "reviewed bag export is saved locally")
-    now = now + 1
-    SlashCmdList.MCLARIONWOWBAGSEXPORT()
-    expectEqual(#bagHistory, 1, "unchanged bag totals do not fill history")
-    expectEqual(#MclarionWowData.characters["Player-1234-ABCDEF12"], 20,
-        "bag capture does not change gear history")
-    local originalBagInfo = C_Container.GetContainerItemInfo
-    for index = 1, 22 do
-        now = now + 1
-        C_Container.GetContainerItemInfo = function(bag, slot)
-            if bag == 0 and slot == 1 then
-                return { itemID = 4242, stackCount = 3 + index }
-            end
-        end
-        SlashCmdList.MCLARIONWOWBAGSEXPORT()
+    expectTrue(panel and panel:IsShown(), "minimap icon opens the addon settings")
+    minimapButton.scripts.OnClick(minimapButton)
+    expectTrue(panel and not panel:IsShown(), "minimap icon closes the addon settings")
+    local manualButton = false
+    for _, frame in ipairs(frames) do
+        if frame.parent == panel and frame.frameType == "Button" and
+            frame.text ~= "Stop logging now" then manualButton = true end
     end
-    C_Container.GetContainerItemInfo = originalBagInfo
-    expectEqual(#bagHistory, 20, "bag history retains at most twenty distinct states")
-    expectTrue(bagHistory[1]:find("|4242:6|", 1, true) ~= nil,
-        "bag history drops the oldest inventory states")
-    local latestBag = bagHistory[#bagHistory]
-    local secretItem = protectedSentinel()
-    secretValues[secretItem] = true
-    C_Container.GetContainerItemInfo = function(bag, slot)
-        if bag == 0 and slot == 1 then return { itemID = secretItem, stackCount = 3 } end
-    end
-    SlashCmdList.MCLARIONWOWBAGSEXPORT()
-    expectEqual(bagHistory[#bagHistory], latestBag, "secret bag item never enters local history")
-    expectTrue(not bagEditBox:GetText():find("MHWOWB1", 1, true),
-        "secret bag item never enters the copy window")
-    C_Container.GetContainerItemInfo = originalBagInfo
-    secretValues[secretItem] = nil
-    inCombat = true
-    SlashCmdList.MCLARIONWOWBAGSEXPORT()
-    expectEqual(bagHistory[#bagHistory], latestBag, "combat cannot store a bag snapshot")
-    inCombat = false
-    local priorStorage = MclarionWowData
-    local unknownStorage = { schema = 99, characters = {}, bags = {} }
-    MclarionWowData = unknownStorage
-    SlashCmdList.MCLARIONWOWBAGSEXPORT()
-    expectEqual(MclarionWowData, unknownStorage, "unknown bag storage schema is not replaced")
-    expectEqual(next(unknownStorage.bags), nil, "unknown bag storage schema is not written")
-    MclarionWowData = priorStorage
-    local touchedProtectedStorage = false
-    local protectedStorage = setmetatable({}, { __index = function()
-        touchedProtectedStorage = true
-        error("protected storage was indexed")
-    end })
-    secretTables[protectedStorage] = true
-    MclarionWowData = protectedStorage
-    SlashCmdList.MCLARIONWOWBAGSEXPORT()
-    expectEqual(touchedProtectedStorage, false, "protected saved data is rejected before indexing")
-    expectEqual(MclarionWowData, protectedStorage, "protected saved data is not overwritten")
-    MclarionWowData = priorStorage
-    secretTables[protectedStorage] = nil
-    local previousBagMap = priorStorage.bags
-    local touchedProtectedBags = false
-    local protectedBags = setmetatable({}, { __index = function()
-        touchedProtectedBags = true
-        error("protected bag map was indexed")
-    end })
-    secretTables[protectedBags] = true
-    priorStorage.bags = protectedBags
-    SlashCmdList.MCLARIONWOWBAGSEXPORT()
-    expectEqual(touchedProtectedBags, false, "protected bag map is rejected before indexing")
-    expectEqual(priorStorage.bags, protectedBags, "protected bag map is not overwritten")
-    priorStorage.bags = previousBagMap
-    secretTables[protectedBags] = nil
-    local priorHistory = previousBagMap["Player-1234-ABCDEF12"]
-    local touchedProtectedHistory = false
-    local protectedHistory = setmetatable({}, { __len = function()
-        touchedProtectedHistory = true
-        error("protected bag history length was read")
-    end })
-    secretTables[protectedHistory] = true
-    previousBagMap["Player-1234-ABCDEF12"] = protectedHistory
-    SlashCmdList.MCLARIONWOWBAGSEXPORT()
-    expectEqual(touchedProtectedHistory, false, "protected history is rejected before reading it")
-    expectEqual(previousBagMap["Player-1234-ABCDEF12"], protectedHistory,
-        "protected bag history is not overwritten")
-    previousBagMap["Player-1234-ABCDEF12"] = priorHistory
-    secretTables[protectedHistory] = nil
-    local previousBagEntry = priorHistory[#priorHistory]
-    local protectedBagEntry = protectedSentinel()
-    secretValues[protectedBagEntry] = true
-    priorHistory[#priorHistory] = protectedBagEntry
-    SlashCmdList.MCLARIONWOWBAGSEXPORT()
-    expectTrue(latestExportText():find("protected", 1, true) ~= nil,
-        "bag capture checks protected history entries before use")
-    priorHistory[#priorHistory] = previousBagEntry
-    secretValues[protectedBagEntry] = nil
-    local oversizedBagHistory = {}
-    for index = 1, 21 do oversizedBagHistory[index] = previousBagEntry end
-    previousBagMap["Player-1234-ABCDEF12"] = oversizedBagHistory
-    SlashCmdList.MCLARIONWOWBAGSEXPORT()
-    expectTrue(#oversizedBagHistory == 21 and
-        latestExportText():find("Storage unavailable", 1, true) ~= nil,
-        "oversized pre-existing bag history is left unchanged")
-    local extraKeyBagHistory = { previousBagEntry, unexpected = previousBagEntry }
-    previousBagMap["Player-1234-ABCDEF12"] = extraKeyBagHistory
-    SlashCmdList.MCLARIONWOWBAGSEXPORT()
-    expectTrue(#extraKeyBagHistory == 1 and extraKeyBagHistory[2] == nil and
-        latestExportText():find("Storage unavailable", 1, true) ~= nil,
-        "bag history with an extra key is rejected unchanged")
-    local sparseBagHistory = { [1] = previousBagEntry, [3] = previousBagEntry }
-    previousBagMap["Player-1234-ABCDEF12"] = sparseBagHistory
-    SlashCmdList.MCLARIONWOWBAGSEXPORT()
-    expectTrue(sparseBagHistory[2] == nil and sparseBagHistory[4] == nil and
-        latestExportText():find("Storage unavailable", 1, true) ~= nil,
-        "sparse bag history is rejected unchanged")
-    local bagInteriorHole = { [1] = previousBagEntry, [2] = previousBagEntry,
-        [4] = previousBagEntry }
-    previousBagMap["Player-1234-ABCDEF12"] = bagInteriorHole
-    SlashCmdList.MCLARIONWOWBAGSEXPORT()
-    expectTrue(bagInteriorHole[3] == nil and bagInteriorHole[5] == nil and
-        latestExportText():find("Storage unavailable", 1, true) ~= nil,
-        "interior bag-history hole is rejected unchanged")
-    local protectedBagKey = protectedSentinel()
-    secretValues[protectedBagKey] = true
-    local protectedKeyHistory = { [1] = previousBagEntry, [protectedBagKey] = previousBagEntry }
-    previousBagMap["Player-1234-ABCDEF12"] = protectedKeyHistory
-    SlashCmdList.MCLARIONWOWBAGSEXPORT()
-    expectTrue(protectedKeyHistory[2] == nil and
-        latestExportText():find("protected", 1, true) ~= nil,
-        "protected extra bag-history key is checked before comparing")
-    secretValues[protectedBagKey] = nil
-    previousBagMap["Player-1234-ABCDEF12"] = priorHistory
+    expectEqual(manualButton, false, "settings no longer offer manual copy buttons")
 end
+
+-- Verify that removing clipboard commands does not remove the bounded histories.
+MclarionWowData = { schema = 1, characters = {}, settings = {
+    autoCombatLog = false, autoCharacterCapture = true,
+    autoBagCapture = true, autoBankCapture = false } }
+chunk("MclarionWow", {})
+local historyFrame
+for _, frame in ipairs(frames) do
+    if frame.events and frame.events.PLAYER_ENTERING_WORLD then historyFrame = frame end
+end
+historyFrame.scripts.OnEvent(historyFrame, "PLAYER_ENTERING_WORLD")
+local history = MclarionWowData.characters["Player-1234-ABCDEF12"]
+local bagHistory = MclarionWowData.bags["Player-1234-ABCDEF12"]
+expectTrue(history and #history == 1 and history[1]:find("^MHWOW2|forever|") ~= nil,
+    "automatic character snapshot remains available without manual commands")
+expectTrue(bagHistory and #bagHistory == 1 and bagHistory[1]:find("^MHWOWB1|forever|") ~= nil,
+    "automatic bag snapshot remains available without manual commands")
+now = now + 1
+historyFrame.scripts.OnEvent(historyFrame, "BAG_UPDATE_DELAYED")
+expectEqual(#bagHistory, 1, "unchanged bag totals still deduplicate")
+for index = 1, 22 do
+    now = now + 1
+    gear[1] = gear[1] + 1
+    historyFrame.scripts.OnEvent(historyFrame, "PLAYER_EQUIPMENT_CHANGED")
+end
+expectEqual(#history, 20, "automatic character history still caps at twenty states")
+local originalBagInfo = C_Container.GetContainerItemInfo
+for index = 1, 22 do
+    C_Container.GetContainerItemInfo = function(bag, slot)
+        if bag == 0 and slot == 1 then return { itemID = 4242, stackCount = index + 3 } end
+    end
+    historyFrame.scripts.OnEvent(historyFrame, "BAG_UPDATE_DELAYED")
+end
+C_Container.GetContainerItemInfo = originalBagInfo
+expectEqual(#bagHistory, 20, "automatic bag history still caps at twenty states")
+local previous = history[#history]
+inCombat = true
+gear[1] = gear[1] + 1
+historyFrame.scripts.OnEvent(historyFrame, "PLAYER_EQUIPMENT_CHANGED")
+expectEqual(history[#history], previous, "combat still blocks automatic character capture")
+inCombat = false
 
 -- Automatic capture remains local to WoW; it never transfers data to the site.
 MclarionWowData = { schema = 1, characters = {} }
@@ -1474,7 +1160,7 @@ if type(SlashCmdList.MCLARIONWOWUI) == "function" then
     end
     expectTrue(panel ~= nil and panel:IsShown(), "settings window can be opened in game")
     expectTrue(panel and panel.fontStrings and #panel.fontStrings >= 4,
-        "settings window reports export, bank, and combat-log status")
+        "settings window reports bank, item, bag and combat-log status")
     local settings = MclarionWowData.settings
     expectTrue(settings and settings.autoCombatLog and settings.autoCharacterCapture and
         settings.autoBagCapture and settings.autoBankCapture,
@@ -1546,9 +1232,6 @@ if type(SlashCmdList.MCLARIONWOWUI) == "function" then
             "settings report a protected bag scan without exposing item details")
         C_Container.GetContainerItemInfo = originalBagInfo
         secretValues[protectedItem] = nil
-        SlashCmdList.MCLARIONWOWBAGSEXPORT()
-        expectTrue(statusContains("Bags snapshot stored in memory"),
-            "manual bag export status distinguishes SavedVariables from a TXT file")
         checkboxes[4]:SetChecked(false)
         checkboxes[4].scripts.OnClick(checkboxes[4])
         expectEqual(settings.autoBankCapture, false, "automatic bank preference persists in saved variables")
@@ -1605,15 +1288,17 @@ end
 MclarionWowData = { schema = 1, characters = {}, settings = {
     autoCombatLog = false, autoCharacterCapture = true,
     autoBagCapture = false, autoBankCapture = false } }
-expectEqual(SLASH_MCLARIONWOWIDENTITY1, "/mhwowidentity", "registers manual identity command")
-SlashCmdList.MCLARIONWOWIDENTITY()
+local identityFrame
+for _, frame in ipairs(frames) do
+    if frame.events and frame.events.PLAYER_EQUIPMENT_CHANGED then identityFrame = frame end
+end
+identityFrame.scripts.OnEvent(identityFrame, "PLAYER_ENTERING_WORLD")
 local identityHistory = MclarionWowData.characters["Player-1234-ABCDEF12"]
 expectTrue(type(identityHistory) == "table" and #identityHistory == 1 and
     identityHistory[1]:find("^MHWOW2|forever|") ~= nil,
-    "manual identity export stores its reviewed MHWOW2 snapshot for WoW's disk flush")
-expectEqual(latestExportText(), identityHistory[1], "identity command selects the saved export")
-SlashCmdList.MCLARIONWOWIDENTITY()
-expectEqual(#identityHistory, 1, "unchanged manual identity snapshots deduplicate")
+    "automatic identity snapshot replaces the manual copy command")
+identityFrame.scripts.OnEvent(identityFrame, "PLAYER_EQUIPMENT_CHANGED")
+expectEqual(#identityHistory, 1, "unchanged automatic identity snapshots deduplicate")
 local latestCapture
 for _, frame in ipairs(frames) do
     if frame.events and frame.events.PLAYER_EQUIPMENT_CHANGED then latestCapture = frame end
@@ -1775,6 +1460,21 @@ C_Item.GetItemInfo = function() return nil end
 reloadedItems.scripts.OnEvent(reloadedItems, "BAG_UPDATE_DELAYED")
 expectEqual(MclarionWowData.items[itemGuid], intact,
     "uncached item metadata leaves a valid schema-2 record untouched")
+
+local previousMinimap = Minimap
+Minimap = nil
+local buttonCount = 0
+for _, frame in ipairs(frames) do
+    if frame.name == "MclarionWowMinimapButton" then buttonCount = buttonCount + 1 end
+end
+chunk("MclarionWow", {})
+local afterCount = 0
+for _, frame in ipairs(frames) do
+    if frame.name == "MclarionWowMinimapButton" then afterCount = afterCount + 1 end
+end
+expectEqual(afterCount, buttonCount, "missing minimap does not prevent addon loading")
+expectTrue(type(SlashCmdList.MCLARIONWOWUI) == "function", "slash UI works without a minimap")
+Minimap = previousMinimap
 C_Item.GetItemInfo = originalMetadataInfo
 
 if failures > 0 then
