@@ -363,6 +363,83 @@ if type(MclarionWow_ProbeProgression) == "function" then
     MclarionWowData = originalData
 end
 
+expectTrue(type(MclarionWow_ProbeProgressionRecords) == "function" and
+    type(SlashCmdList.MCLARIONWOWPROGRESSRECORDS) == "function",
+    "provides an explicit read-only record-shape probe")
+if type(MclarionWow_ProbeProgressionRecords) == "function" then
+    local oldQuestCount, oldFactionCount = GetNumQuestLogEntries, GetNumFactions
+    local oldQuestTitle, oldFactionInfo = GetQuestLogTitle, GetFactionInfo
+    local oldData = MclarionWowData
+    MclarionWowData = { schema = 2, characters = { ["Player-1234-ABCDEF12"] = { "existing snapshot" } } }
+    local expectedData = { schema = 2, characters = { ["Player-1234-ABCDEF12"] = { "existing snapshot" } } }
+    _G.GetNumQuestLogEntries = function() return 2 end
+    _G.GetNumFactions = function() return 2 end
+    _G.GetQuestLogTitle = function(index)
+        if index == 1 then return "private header", nil, nil, true end
+        return "private quest", 80, nil, false, nil, nil, nil, 4242
+    end
+    _G.GetFactionInfo = function(index)
+        if index == 1 then return "private header", nil, nil, nil, nil, nil, nil, nil, true end
+        return "private faction", nil, 4, 0, 3000, 1200, nil, nil, false,
+            false, true, nil, false, 5678
+    end
+    local report, problem = MclarionWow_ProbeProgressionRecords()
+    expectEqual(problem, nil, "record probe returns without an error")
+    expectTrue(report and report:find("Quest records: 1/2", 1, true) and
+        report:find("faction records: 1/2", 1, true) and
+        report:find("No progression data saved.", 1, true) ~= nil and
+        report:find("4242", 1, true) == nil and report:find("5678", 1, true) == nil and
+        report:find("private", 1, true) == nil,
+        "record probe validates leaf IDs and standings but outputs only aggregate counts")
+    SlashCmdList.MCLARIONWOWPROGRESSRECORDS()
+    expectTrue(sameData(MclarionWowData, expectedData),
+        "record probe and slash handler leave nested SavedVariables unchanged")
+    _G.GetFactionInfo = function(index)
+        if index == 1 then return "private header", nil, nil, nil, nil, nil, nil, nil, true end
+        return "private faction", nil, 4, 0, 3000, 0 / 0, nil, nil, false,
+            false, true, nil, false, 5678
+    end
+    report = MclarionWow_ProbeProgressionRecords()
+    expectTrue(report and report:find("faction records: unavailable", 1, true) ~= nil,
+        "non-finite standing values cannot be counted as valid faction records")
+    local protectedField = protectedSentinel()
+    secretValues[protectedField] = true
+    _G.GetQuestLogTitle = function(index)
+        if index == 1 then return "private header", nil, nil, true end
+        return "private quest", 80, nil, false, nil, nil, nil, protectedField
+    end
+    _G.GetFactionInfo = function(index)
+        if index == 1 then return "private header", nil, nil, nil, nil, nil, nil, nil, true end
+        return "private faction", nil, 4, 0, 3000, protectedField, nil, nil,
+            false, false, true, nil, false, 5678
+    end
+    report = MclarionWow_ProbeProgressionRecords()
+    expectTrue(report and report:find("Quest records: protected", 1, true) and
+        report:find("faction records: protected", 1, true) ~= nil,
+        "secret leaf fields refuse both categories without inspecting the protected value")
+    secretValues[protectedField] = nil
+    local leafReads = 0
+    _G.GetNumQuestLogEntries = function() return 129 end
+    _G.GetNumFactions = function() return 257 end
+    _G.GetQuestLogTitle = function() leafReads = leafReads + 1 end
+    _G.GetFactionInfo = function() leafReads = leafReads + 1 end
+    report = MclarionWow_ProbeProgressionRecords()
+    expectTrue(report and report:find("Quest records: over limit", 1, true) and
+        report:find("faction records: over limit", 1, true) ~= nil and leafReads == 0,
+        "oversized UI row views refuse before any per-row read")
+    inCombat = true
+    report, problem = MclarionWow_ProbeProgressionRecords()
+    expectTrue(report == nil and type(problem) == "string" and
+        problem:find("combat", 1, true) ~= nil and leafReads == 0,
+        "record probe refuses combat before reading rows")
+    inCombat = false
+    expectTrue(sameData(MclarionWowData, expectedData),
+        "protected, oversized and combat record probes never change SavedVariables")
+    _G.GetNumQuestLogEntries, _G.GetNumFactions = oldQuestCount, oldFactionCount
+    _G.GetQuestLogTitle, _G.GetFactionInfo = oldQuestTitle, oldFactionInfo
+    MclarionWowData = oldData
+end
+
 expectTrue(type(MclarionWow_ProbeBank) == "function", "provides a manual count-only character bank probe")
 if type(MclarionWow_ProbeBank) == "function" then
     local oldSlots, oldInfo = C_Container.GetContainerNumSlots, C_Container.GetContainerItemInfo

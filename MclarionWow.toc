@@ -3,7 +3,7 @@
 ## Title: MclarionWow
 ## Notes: Opt-in Forever snapshots, capture-now controls, own-bank details, and minimap settings.
 ## Author: Mclarion
-## Version: 0.11.4
+## Version: 0.11.5
 ## SavedVariables: MclarionWowData
 
 MclarionWow.lua

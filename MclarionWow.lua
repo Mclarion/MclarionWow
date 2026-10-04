@@ -310,6 +310,85 @@ function MclarionWow_ProbeProgression()
         "(collapsed sections may be hidden). No progression data saved.", quests, factions)
 end
 
+-- Diagnostic only. Read candidate leaf shapes without keeping IDs or values.
+-- An unsupported row refuses its category rather than silently omitting it.
+local function progressionRecordMethod(api)
+    if isSecret(api) then return nil, "protected" end
+    if type(api) ~= "function" then return nil, "unavailable" end
+    return api
+end
+
+local function boundedStandingValue(value)
+    return type(value) == "number" and value >= -2147483647 and
+        value <= 2147483647 and value == math.floor(value)
+end
+
+local function questRecordSummary()
+    local rows = progressionRowCount(GetNumQuestLogEntries, C_QuestLog,
+        "GetNumQuestLogEntries")
+    if rows == "protected" or rows == "unavailable" then return rows end
+    local count = tonumber(rows)
+    if count > 128 then return "over limit" end
+    local read, reason = progressionRecordMethod(GetQuestLogTitle)
+    if not read then return reason end
+    local leaves = 0
+    for index = 1, count do
+        local ok, _, _, _, header, _, _, _, questId = pcall(read, index)
+        if not ok then return "unavailable" end
+        if isSecret(header) or isSecret(questId) then return "protected" end
+        if type(header) ~= "boolean" then return "unavailable" end
+        if not header then
+            if not positiveInteger(questId) or questId > 2147483647 then
+                return "unavailable"
+            end
+            leaves = leaves + 1
+        end
+    end
+    return leaves .. "/" .. count
+end
+
+local function factionRecordSummary()
+    local rows = progressionRowCount(GetNumFactions, C_Reputation, "GetNumFactions")
+    if rows == "protected" or rows == "unavailable" then return rows end
+    local count = tonumber(rows)
+    if count > 256 then return "over limit" end
+    local read, reason = progressionRecordMethod(GetFactionInfo)
+    if not read then return reason end
+    local leaves = 0
+    for index = 1, count do
+        local ok, _, _, standing, barMin, barMax, barValue, _, _, header,
+            _, _, _, _, factionId = pcall(read, index)
+        if not ok then return "unavailable" end
+        if isSecret(header) or isSecret(factionId) or isSecret(standing) or
+            isSecret(barMin) or isSecret(barMax) or isSecret(barValue) then
+            return "protected"
+        end
+        if type(header) ~= "boolean" then return "unavailable" end
+        if not header then
+            if not positiveInteger(factionId) or factionId > 2147483647 or
+                not positiveInteger(standing) or standing > 16 or
+                not boundedStandingValue(barMin) or
+                not boundedStandingValue(barMax) or
+                not boundedStandingValue(barValue) or barMin >= barMax or
+                barValue < barMin or barValue > barMax then
+                return "unavailable"
+            end
+            leaves = leaves + 1
+        end
+    end
+    return leaves .. "/" .. count
+end
+
+function MclarionWow_ProbeProgressionRecords()
+    local combat, err = combatStatus()
+    if combat == nil then return nil, err end
+    if combat then return nil, "Progression record probe is unavailable during combat." end
+    local quests = questRecordSummary()
+    local factions = factionRecordSummary()
+    return string.format("Quest records: %s; faction records: %s (visible rows only). " ..
+        "No progression data saved.", quests, factions)
+end
+
 -- Shared fail-closed scanner for explicitly requested reads of the logged-in
 -- character's own purchased, currently viewable bank tabs. Account-bank IDs
 -- are rejected before any slots are read. Results are never persisted here.
@@ -1225,6 +1304,12 @@ SLASH_MCLARIONWOWPROGRESSPROBE1 = "/mhwowprogressprobe"
 SlashCmdList.MCLARIONWOWPROGRESSPROBE = function()
     local ok, report, err = pcall(MclarionWow_ProbeProgression)
     print("MclarionWow: " .. (ok and (report or err) or "Progression probe unavailable."))
+end
+
+SLASH_MCLARIONWOWPROGRESSRECORDS1 = "/mhwowprogressrecords"
+SlashCmdList.MCLARIONWOWPROGRESSRECORDS = function()
+    local ok, report, err = pcall(MclarionWow_ProbeProgressionRecords)
+    print("MclarionWow: " .. (ok and (report or err) or "Progression record probe unavailable."))
 end
 
 local captureFrame = CreateFrame("Frame")
