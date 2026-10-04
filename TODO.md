@@ -1,6 +1,6 @@
 # MclarionWow handoff TODO — 2026-10-04
 
-**0.11.3 installed (`5728c6c`):** The existing opt-in own-character MHWOW2 snapshot now retries on level-up and zone-change events. Level/map/zone remain bounded by the 20-record character history; no website parser or schema change. Empty zone text is refused. This is not an exhaustive travel history. The 288-assertion mock suite, both synthetic fixture checks and Lua syntax passed. WoW was stopped for installation; a separate readback confirmed both installed hashes, version, and a 0.11.2 backup. Live Forever event checks remain pending.
+**0.11.3 installed (`5728c6c`):** The existing opt-in own-character MHWOW2 snapshot now retries on level-up and zone-change events. Level/map/zone remain bounded by the 20-record character history; no website parser or schema change. Empty zone text is refused. This is not an exhaustive travel history. The 288-assertion mock suite, both synthetic fixture checks and Lua syntax passed. WoW was stopped for installation; a separate readback confirmed both installed hashes, version, and a 0.11.2 backup. After a player-reported named-zone crossing, `/reload`, and game exit, a stopped-game read-only check found a recent adjacent old-zone-to-new-zone transition in one saved character history. Saved-state zone observation is verified; the exact triggering event and website import were not independently observed.
 
 **Closed at player request:** The earlier empty Hel snapshot investigation is done for now. The cause remains unknown; retain 0.11.2's safety guards and historical evidence, but do not request more Hel checks unless the player reopens the issue.
 
@@ -39,7 +39,7 @@
 ## Next progression work
 
 - [x] Implement the first zone/level observation slice using the existing opted-in, versioned MHWOW2 own-character snapshot and 20-entry bound; add level/zone event retries and reject missing zone text. No new storage contract or importer changes are needed for this limited slice.
-- [ ] Confirm level/zone event behavior in the live Forever client; mocked events cannot prove game delivery. Do not claim an exhaustive travel history.
+- [x] Confirm a live Forever zone crossing produced adjacent old/new-zone observations in the game-written save after `/reload` and exit. The exact event responsible was not isolated; this is not an exhaustive travel history or a level-up test.
 - [ ] Validate quest/reputation source APIs and a separate bounded contract before coding; talents and professions/recipes follow independently. No gameplay automation.
 
 ## Archived 0.10.x status (historical, superseded where above differs)
