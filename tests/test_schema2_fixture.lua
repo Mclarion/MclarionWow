@@ -1,5 +1,10 @@
 -- Run against a generated, synthetic fixture; never a real player save.
 local fixture = assert(..., "usage: lua tests/test_schema2_fixture.lua <fixture>")
+local file = assert(io.open(fixture, "rb"))
+local serialized = assert(file:read("*a"))
+assert(file:close())
+assert(serialized:match('%["bank"%]%s*=%s*{%s*"MHWOWI1|forever|'),
+    "bank pages must use the game's implicit Lua array syntax")
 assert(loadfile(fixture))()
 local data = assert(MclarionWowData)
 assert(data.schema == 2)

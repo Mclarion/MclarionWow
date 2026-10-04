@@ -57,7 +57,7 @@ local lines = {
     "    [\"items\"] = {",
     "        [" .. quote(guid) .. "] = {",
     "            [\"bags\"] = " .. quote(details.bags) .. ",",
-    "            [\"bank\"] = { [1] = " .. quote(bankItem) .. ", [2] = " .. quote(bankItem2) .. " },",
+    "            [\"bank\"] = { " .. quote(bankItem) .. ", " .. quote(bankItem2) .. " },",
     "        },",
     "    },",
     "}",
