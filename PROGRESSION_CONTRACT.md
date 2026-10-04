@@ -4,7 +4,7 @@
 
 ## Source evidence and limits
 
-The public Blizzard UI-source mirror at `Gethe/wow-ui-source`, branch `classic`, commit `a53b9b28857f` (5.5.4 build 70032), calls global `GetNumQuestLogEntries()` in `Vanilla/QuestLogFrame.lua` and `GetNumFactions()` in `Vanilla/ReputationFrame.lua`. The former yields quest-log row and quest counts; the latter yields faction UI row count. Modern generated docs also expose namespaced count methods in some clients. **These branches are not the installed Forever 1.60 client/build.** A mock test or neighboring client's API does not establish that either function exists or is unprotected in Forever. The installed-client probe will answer only that narrow capability question. It never calls an enumeration API, interprets a header as a quest, or reads a record's name or ID.
+The public Blizzard UI-source mirror at `Gethe/wow-ui-source`, branch `classic`, commit `a53b9b28857f` (5.5.4 build 70032), calls global `GetNumQuestLogEntries()` in `Vanilla/QuestLogFrame.lua` and `GetNumFactions()` in `Vanilla/ReputationFrame.lua`. The former yields quest-log row and quest counts; the latter yields faction UI row count. Modern generated docs also expose namespaced count methods in some clients. **These branches are not the installed Forever 1.60 client/build.** The player reported 22 quest-log rows and 5 faction rows from the installed 0.11.4 probe in Forever. This supports count availability only; it does not reveal whether global or namespaced methods supplied the results. The probe never calls an enumeration API, interprets a header as a quest, or reads a record's name or ID.
 
 ## Proposed future capture contract — not enabled
 
