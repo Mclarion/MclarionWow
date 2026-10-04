@@ -1,8 +1,10 @@
 -- Generate a synthetic schema-2 SavedVariables fixture from the actual addon
 -- builders and the mock-game test suite. Never use a real game save as input.
-local addonPath, destination = ...
+local addonPath, destination, syntax = ...
 assert(type(addonPath) == "string" and type(destination) == "string",
-    "usage: lua tests/generate_schema2_fixture.lua MclarionWow.lua <output>")
+    "usage: lua tests/generate_schema2_fixture.lua MclarionWow.lua <output> [implicit|explicit]")
+syntax = syntax or "implicit"
+assert(syntax == "implicit" or syntax == "explicit", "unsupported synthetic array syntax")
 assert(loadfile("tests/test_mclarion_wow.lua"))(addonPath)
 
 local guid = UnitGUID("player")
@@ -41,6 +43,9 @@ assert(type(details.bags) == "string" and details.bags:find("^MHWOWI1|forever|")
 assert(type(bankItem) == "string" and bankItem:find("^MHWOWI1|forever|"))
 assert(type(bankItem2) == "string" and bankItem2:find("^MHWOWI1|forever|"))
 local quote = function(s) return string.format("%q", s) end
+local bankPages = syntax == "implicit" and
+    quote(bankItem) .. ", " .. quote(bankItem2) or
+    "[1] = " .. quote(bankItem) .. ", [2] = " .. quote(bankItem2)
 local lines = {
     "MclarionWowData = {",
     "    [\"schema\"] = 2,",
@@ -57,7 +62,7 @@ local lines = {
     "    [\"items\"] = {",
     "        [" .. quote(guid) .. "] = {",
     "            [\"bags\"] = " .. quote(details.bags) .. ",",
-    "            [\"bank\"] = { " .. quote(bankItem) .. ", " .. quote(bankItem2) .. " },",
+    "            [\"bank\"] = { " .. bankPages .. " },",
     "        },",
     "    },",
     "}",
