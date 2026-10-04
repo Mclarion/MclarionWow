@@ -277,6 +277,39 @@ function MclarionWow_ProbeBags()
     return report, err
 end
 
+-- Capability check only: neither a row count nor an unavailable API proves
+-- which quests or factions the player has. Do not persist probe results.
+local function progressionRowCount(legacy, namespace, method)
+    if isSecret(legacy) then return "protected" end
+    local read = legacy
+    if type(read) ~= "function" then
+        if isSecret(namespace) or
+            (type(namespace) == "table" and issecrettable(namespace)) then
+            return "protected"
+        end
+        if type(namespace) ~= "table" then return "unavailable" end
+        read = namespace[method]
+    end
+    if isSecret(read) then return "protected" end
+    if type(read) ~= "function" then return "unavailable" end
+    local ok, count = pcall(read)
+    if not ok then return "unavailable" end
+    if isSecret(count) then return "protected" end
+    if not nonnegativeInteger(count) or count > 2048 then return "unavailable" end
+    return tostring(count)
+end
+
+function MclarionWow_ProbeProgression()
+    local combat, err = combatStatus()
+    if combat == nil then return nil, err end
+    if combat then return nil, "Progression probe is unavailable during combat." end
+    local quests = progressionRowCount(GetNumQuestLogEntries, C_QuestLog,
+        "GetNumQuestLogEntries")
+    local factions = progressionRowCount(GetNumFactions, C_Reputation, "GetNumFactions")
+    return string.format("Quest-log rows: %s (headers included); faction rows: %s " ..
+        "(collapsed sections may be hidden). No progression data saved.", quests, factions)
+end
+
 -- Shared fail-closed scanner for explicitly requested reads of the logged-in
 -- character's own purchased, currently viewable bank tabs. Account-bank IDs
 -- are rejected before any slots are read. Results are never persisted here.
@@ -1186,6 +1219,12 @@ SLASH_MCLARIONWOWBANKPROBE1 = "/mhwowbankprobe"
 SlashCmdList.MCLARIONWOWBANKPROBE = function()
     local ok, report, err = pcall(MclarionWow_ProbeBank)
     print("MclarionWow: " .. (ok and (report or err) or "Bank probe unavailable."))
+end
+
+SLASH_MCLARIONWOWPROGRESSPROBE1 = "/mhwowprogressprobe"
+SlashCmdList.MCLARIONWOWPROGRESSPROBE = function()
+    local ok, report, err = pcall(MclarionWow_ProbeProgression)
+    print("MclarionWow: " .. (ok and (report or err) or "Progression probe unavailable."))
 end
 
 local captureFrame = CreateFrame("Frame")

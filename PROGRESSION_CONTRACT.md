@@ -1,0 +1,17 @@
+# Quest/reputation capability gate (draft, 4 October 2026)
+
+**Status: diagnostic only. No quest IDs, faction IDs, standing values, completion flags, or progression snapshots are collected.** Addon 0.11.4 offers `/mhwowprogressprobe` as a manual, out-of-combat, count-only capability check. It does not alter SavedVariables, require a new opt-in, or change schema 2. The reported quest-log row count may include headers; the faction row count may omit collapsed sections. Neither count is a completed-quest total or a complete faction list. Unavailable/protected results are not zero.
+
+## Source evidence and limits
+
+The public Blizzard UI-source mirror at `Gethe/wow-ui-source`, branch `classic`, commit `a53b9b28857f` (5.5.4 build 70032), calls global `GetNumQuestLogEntries()` in `Vanilla/QuestLogFrame.lua` and `GetNumFactions()` in `Vanilla/ReputationFrame.lua`. The former yields quest-log row and quest counts; the latter yields faction UI row count. Modern generated docs also expose namespaced count methods in some clients. **These branches are not the installed Forever 1.60 client/build.** A mock test or neighboring client's API does not establish that either function exists or is unprotected in Forever. The installed-client probe will answer only that narrow capability question. It never calls an enumeration API, interprets a header as a quest, or reads a record's name or ID.
+
+## Proposed future capture contract — not enabled
+
+- Quest and reputation collection require **separate, first-run-off consent switches**. An existing character/zone or item switch must not silently opt a player into either source. Only the logged-in character is eligible; refuse combat, secret/protected values, incomplete views and malformed data. No gameplay automation, network calls or external file reads.
+- Keep schema 2 and the current MHWOW1/MHWOW2/B1/K1/I1 histories intact until both website and desktop importers explicitly accept an opt-in schema 3 extension. Proposed new records: `MHWOWQ1` for a bounded observation of active quest-log leaf IDs, and `MHWOWR1` for a bounded observation of visible faction standing rows. The records must identify their limited observation scope, build, server time and own-character GUID. **No writer or importer exists yet**, and byte-level field order is not finalized.
+- Cap each per-character source at 20 deduplicated observations. Candidate per-observation caps are 100 quest IDs and 200 visible faction rows; reject over-limit or incomplete scans rather than truncate or overwrite a valid prior observation. A total progression byte cap and maximum GUID count must be agreed with both importers before enabling either writer.
+- Absence from an active quest log does **not** prove completion, failure or abandonment. A collapsed or hidden faction row does **not** prove zero reputation. Quest turn-in events alone do not establish a complete quest history. Any completion/delta claim needs its own verified API/event semantics and explicit versioned format.
+- Release gate: verify the exact Forever APIs and row semantics in game, then finalize a wire schema and synthetic/parser fixtures (including idempotent reimport) independently for quests and reputations. Only after both relevant importers accept that contract may an opt-in SavedVariables writer be released. Do not ask the player to upload a raw save just to run this diagnostic.
+
+This document is a design boundary for other threads, **not** evidence that progression data already exists in a game save, website import or client database.

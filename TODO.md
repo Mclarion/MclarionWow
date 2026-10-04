@@ -40,7 +40,8 @@
 
 - [x] Implement the first zone/level observation slice using the existing opted-in, versioned MHWOW2 own-character snapshot and 20-entry bound; add level/zone event retries and reject missing zone text. No new storage contract or importer changes are needed for this limited slice.
 - [x] Confirm a live Forever zone crossing produced adjacent old/new-zone observations in the game-written save after `/reload` and exit. The exact event responsible was not isolated; this is not an exhaustive travel history or a level-up test.
-- [ ] Validate quest/reputation source APIs and a separate bounded contract before coding; talents and professions/recipes follow independently. No gameplay automation.
+- [x] Research nearby Blizzard UI-source quest-log and faction count calls and draft `PROGRESSION_CONTRACT.md` with separate consent, bounded scope and importer gates. Those public branches are **not** the exact Forever client. Add only a manual count-only, non-persisting `/mhwowprogressprobe` to test capability; do not ship quest/reputation capture from unverified APIs.
+- [ ] Confirm the probe's two count API results in the exact Forever client. Then verify per-record read-only sources and finalize a bounded, versioned parser contract **before** coding any opt-in quest or reputation writer. Talents and professions/recipes follow independently. No gameplay automation.
 
 ## Archived 0.10.x status (historical, superseded where above differs)
 

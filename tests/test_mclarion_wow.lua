@@ -307,6 +307,62 @@ if type(MclarionWow_ProbeBags) == "function" then
     MclarionWowData = storedBeforeProbe
 end
 
+expectTrue(type(MclarionWow_ProbeProgression) == "function" and
+    type(SlashCmdList.MCLARIONWOWPROGRESSPROBE) == "function",
+    "provides a manual count-only progression capability probe")
+if type(MclarionWow_ProbeProgression) == "function" then
+    local originalQuests, originalFactions = GetNumQuestLogEntries, GetNumFactions
+    local originalQuestApi, originalReputationApi = C_QuestLog, C_Reputation
+    local originalData = MclarionWowData
+    MclarionWowData = { schema = 2, characters = { ["Player-1234-ABCDEF12"] = { "existing snapshot" } } }
+    local expectedData = { schema = 2, characters = { ["Player-1234-ABCDEF12"] = { "existing snapshot" } } }
+    local questCalls, factionCalls = 0, 0
+    _G.GetNumQuestLogEntries = function() questCalls = questCalls + 1; return 4, 3 end
+    _G.GetNumFactions = function() factionCalls = factionCalls + 1; return 7 end
+    local report, problem = MclarionWow_ProbeProgression()
+    expectEqual(problem, nil, "available progression counts return without an error")
+    expectTrue(report and report:find("Quest-log rows: 4", 1, true) and
+        report:find("faction rows: 7", 1, true) and
+        report:find("No progression data saved.", 1, true) ~= nil,
+        "probe reports only bounded row counts and never implies full quest/faction coverage")
+    expectTrue(questCalls == 1 and factionCalls == 1 and sameData(MclarionWowData, expectedData),
+        "probe reads one count per category without changing SavedVariables")
+    SlashCmdList.MCLARIONWOWPROGRESSPROBE()
+    expectTrue(sameData(MclarionWowData, expectedData), "progression slash probe does not persist data")
+    _G.GetNumQuestLogEntries, _G.GetNumFactions = nil, nil
+    _G.C_QuestLog = { GetNumQuestLogEntries = function() return 5 end }
+    _G.C_Reputation = { GetNumFactions = function() return 8 end }
+    report = MclarionWow_ProbeProgression()
+    expectTrue(report and report:find("Quest-log rows: 5", 1, true) and
+        report:find("faction rows: 8", 1, true) ~= nil, "probe uses guarded namespaced count APIs if present")
+    local hidden = protectedSentinel()
+    secretValues[hidden] = true
+    _G.C_QuestLog.GetNumQuestLogEntries = function() return hidden end
+    report = MclarionWow_ProbeProgression()
+    expectTrue(report and report:find("Quest-log rows: protected", 1, true) ~= nil,
+        "secret quest count is refused before arithmetic or display")
+    secretValues[hidden] = nil
+    secretTables[C_Reputation] = true
+    report = MclarionWow_ProbeProgression()
+    expectTrue(report and report:find("faction rows: protected", 1, true) ~= nil,
+        "secret reputation namespace is not inspected")
+    secretTables[C_Reputation] = nil
+    _G.C_QuestLog.GetNumQuestLogEntries = function() return 4096 end
+    _G.C_Reputation.GetNumFactions = function() error("protected mock call") end
+    report = MclarionWow_ProbeProgression()
+    expectTrue(report and report:find("Quest-log rows: unavailable", 1, true) and
+        report:find("faction rows: unavailable", 1, true) ~= nil,
+        "implausible and failed count calls fail closed independently")
+    inCombat = true
+    report, problem = MclarionWow_ProbeProgression()
+    expectTrue(report == nil and type(problem) == "string" and
+        problem:find("combat", 1, true) ~= nil, "progression probe refuses combat")
+    inCombat = false
+    _G.GetNumQuestLogEntries, _G.GetNumFactions = originalQuests, originalFactions
+    _G.C_QuestLog, _G.C_Reputation = originalQuestApi, originalReputationApi
+    MclarionWowData = originalData
+end
+
 expectTrue(type(MclarionWow_ProbeBank) == "function", "provides a manual count-only character bank probe")
 if type(MclarionWow_ProbeBank) == "function" then
     local oldSlots, oldInfo = C_Container.GetContainerNumSlots, C_Container.GetContainerItemInfo
