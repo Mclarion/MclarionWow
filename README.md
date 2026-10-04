@@ -14,6 +14,8 @@ A **synthetic, test-only** schema-2 file with two own-bank item pages is availab
 
 **Bank test in progress:** on the next live bank-opening attempt, the UI reported `Bank: Capture unavailable: client refused the bank scan` and `Items: Capture unavailable: no complete cached item scan`. These are generic refusal statuses, not a diagnosed cause or evidence that the already saved bag details were erased. The player had not used **Bank (Manual)**; that command is not required for automatic capture. The next test is to select the **character-bank tab/page in the game's bank UI**, out of combat, then recheck both statuses before saving; the first opening event may precede an active own-bank view.
 
+**Bank follow-up (player-reported):** clicking the bank's bag-icon tab changed the **Bank** status to `Captured in memory; disk update waits for logout or /reload`. This establishes a successful in-memory bank-total scan after the initial refusal, not a disk write, changed totals, or successful bank-item metadata capture. The Items status is still awaiting confirmation.
+
 ## Use
 
 1. Install the `MclarionWow` directory under the Forever client's `Interface/AddOns` directory **while the client is closed**. The TOC targets interface `16001` and game type `camelot`; installation alone does not prove in-game compatibility.
