@@ -1,12 +1,12 @@
 # MclarionWow handoff TODO — 2026-10-04
 
-**0.11.1 candidate, not yet installed:** the user clarified that the missing buttons should be **capture-now controls**, not restored clipboard exports. The screenshot of installed 0.11.0 shows all five opt-ins checked and no capture buttons; it also shows an incomplete item-cache scan after bag sorting. Four new buttons reuse existing validated scanners. The menu need not stay open, loot/bag updates rescan automatically, unchanged item totals deduplicate, and own-bank opening rescans only when the character-bank tab is already active. Mock tests pass 264 assertions, both synthetic bank fixtures pass; live 0.11.1 layout/button checks are still pending.
+**0.11.1 installed:** the player clarified that the missing buttons should be **capture-now controls**, not restored clipboard exports. Installed code `d7507b9` adds four buttons that reuse validated scanners while preserving schema and opt-ins. WoW was stopped during installation; a separate readback verified both installed hashes and a recoverable 0.11.0 backup. The menu need not stay open, loot/bag updates rescan automatically, unchanged item totals deduplicate, and own-bank opening rescans only when the character-bank tab is already active. Mock tests pass 264 assertions and both synthetic bank fixtures pass; **live 0.11.1 layout/button checks remain pending**.
 
 ## 0.11.1 release checks
 
 - [x] Add `Character now`, `Bags now`, `Bank now`, and `Items now` without bringing back text-copy commands or popup. Show category statuses, opt-in/combat/cache refusals and unambiguous automatic-capture/bank-view instructions.
 - [x] Exercise automatic bag updates with the addon menu closed; prove unchanged totals deduplicate and account-bank views cannot be scanned.
-- [ ] Publish and install only while WoW is stopped, with the previous runtime backed up and hashes read back. Keep any game-written SavedVariables untouched.
+- [x] Published and installed while WoW was stopped; the 0.11.0 code backup and installed Lua/TOC hashes were verified by readback. No game-written SavedVariables were touched.
 - [ ] Ask the player for one live 0.11.1 UI/capture check; do not claim screenshot layout or in-game button behavior from Lua mocks alone.
 
 ## 0.11.0 completed (installed)

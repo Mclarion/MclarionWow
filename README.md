@@ -1,6 +1,6 @@
 # MclarionWow
 
-Forever-only, read-only addon for the logged-in character. Installed 0.11.0 retired copy/paste exports and added a player-confirmed minimap icon. **0.11.1 source candidate** restores four *capture-now* buttons without restoring copy exports. Existing SavedVariables and wire formats are preserved; 0.11.1 is not installed until the game is closed and release checks pass.
+Forever-only, read-only addon for the logged-in character. **0.11.1 is installed:** four *capture-now* buttons are back without restoring copy exports. The 0.11.0 minimap icon was player-confirmed; the new 0.11.1 layout/button actions still need a live in-game check. Published code `d7507b9` was installed while WoW was stopped, read back with matching hashes, and the previous runtime was backed up. SavedVariables and wire formats are unchanged.
 
 ## Use the game-written file
 
