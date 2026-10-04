@@ -1182,7 +1182,7 @@ local function setWindowMode(bankDiagnostic)
     windowTitle:SetText(bankDiagnostic and "MclarionWow — Bank diagnostic (counts only)" or
         "MclarionWow — manual snapshot export")
     windowInstructions:SetText(bankDiagnostic and
-        "Only aggregate counts are shown. Press Ctrl+C to copy; no bank items are saved." or
+        "Only aggregate counts are shown. Opted-in item details save separately on an own-bank scan." or
         "The text below is selected. Press Ctrl+C, then paste it where you choose.")
 end
 
@@ -1295,9 +1295,9 @@ SlashCmdList.MCLARIONWOWBANKSEXPORT = function()
     local ok, export, err = pcall(MclarionWow_BuildBankExport)
     if ok and export then recordExport("Bank (manual)") end
     if not window then createWindow() end
-    windowTitle:SetText("MclarionWow — Bank item export (manual only)")
+    windowTitle:SetText("MclarionWow — Bank totals (manual copy)")
     windowInstructions:SetText(
-        "Review before copying. No bank item data is saved; press Ctrl+C to copy where you choose.")
+        "Copy numeric totals with Ctrl+C. Opted-in item details save separately on an own-bank scan.")
     setExportText(ok and (export or "Bank export unavailable: " .. (err or "unknown error")) or
         "Bank export unavailable: client refused the scan.")
     window:Show()

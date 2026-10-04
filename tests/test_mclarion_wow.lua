@@ -348,6 +348,8 @@ if type(MclarionWow_ProbeBank) == "function" then
     expectEqual(bankBox and bankBox:GetText(), report, "bank popup contains only the count report")
     expectTrue(bankWindow and bankWindow.fontStrings[1].text:find("Bank diagnostic", 1, true) ~= nil,
         "bank popup identifies the count-only diagnostic")
+    expectTrue(bankWindow and bankWindow.fontStrings[2].text:find("Opted-in item details", 1, true) ~= nil,
+        "bank diagnostic does not falsely claim item details are never saved")
     expectTrue(sameData(MclarionWowData, expectedStorage), "bank popup leaves nested saved data unchanged")
     bankWindow:Hide()
     SlashCmdList.MCLARIONWOWBANKPROBE()
@@ -581,8 +583,9 @@ if type(MclarionWow_BuildBankExport) == "function" then
         "manual bank command shows the exact selectable export")
     expectTrue(bankWindow and bankWindow.shown and bankBox.focused and bankBox.highlighted,
         "manual bank export opens and selects the copy box")
-    expectTrue(bankWindow and bankWindow.fontStrings[1].text:find("Bank item export", 1, true) ~= nil,
-        "bank item export is clearly distinguished from the count-only diagnostic")
+    expectTrue(bankWindow and bankWindow.fontStrings[1].text:find("Bank totals", 1, true) ~= nil and
+        bankWindow.fontStrings[2].text:find("Opted-in item details", 1, true) ~= nil,
+        "manual bank totals are distinguished from opted-in item detail capture")
     expectTrue(sameData(MclarionWowData, expectedStorage),
         "manual bank export never writes SavedVariables")
     inCombat = true

@@ -3,7 +3,7 @@
 ## Title: MclarionWow
 ## Notes: Local Forever snapshots, own-bank capture while open, combat logging, and manual exports.
 ## Author: Mclarion
-## Version: 0.10.0
+## Version: 0.10.1
 ## SavedVariables: MclarionWowData
 
 MclarionWow.lua
