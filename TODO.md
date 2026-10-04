@@ -7,6 +7,7 @@
 - [x] Add `Character now`, `Bags now`, `Bank now`, and `Items now` without bringing back text-copy commands or popup. Show category statuses, opt-in/combat/cache refusals and unambiguous automatic-capture/bank-view instructions.
 - [x] Exercise automatic bag updates with the addon menu closed; prove unchanged totals deduplicate and account-bank views cannot be scanned.
 - [x] Published and installed while WoW was stopped; the 0.11.0 code backup and installed Lua/TOC hashes were verified by readback. No game-written SavedVariables were touched.
+- [ ] Refresh and hash-verify `B:\MclarionWow-Data-README.md` from the published `DATA_STORAGE.md` when the Windows host is reachable; the attempted transfer timed out, so its current state is unknown. The local root and public docs are synchronized.
 - [ ] Ask the player for one live 0.11.1 UI/capture check; do not claim screenshot layout or in-game button behavior from Lua mocks alone.
 
 ## 0.11.0 completed (installed)
