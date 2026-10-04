@@ -228,6 +228,11 @@ local function scanBags(collectTotals)
         if not nonnegativeInteger(slots) or slots > 120 then
             return nil, "Bag slot count is unavailable."
         end
+        -- A player always has a backpack. Zero here is an uninitialized view,
+        -- not evidence that the character emptied all of their bags.
+        if bag == 0 and slots == 0 then
+            return nil, "Backpack slots are unavailable."
+        end
         slotsTotal = slotsTotal + slots
         for slot = 1, slots do
             local item = getInfo(bag, slot)
@@ -341,6 +346,7 @@ local function scanCharacterBank(collectTotals)
         end
         tabCount = tabCount + 1
     end
+    if tabCount == 0 then return nil, "Character bank tabs are unavailable." end
     local tabIds, scannedIds = {}, {}
     for index = 1, tabCount do
         local tab = tabs[index]
@@ -374,6 +380,7 @@ local function scanCharacterBank(collectTotals)
         if not nonnegativeInteger(slots) or slots > 120 then
             return nil, "Bank slot count is unavailable."
         end
+        if slots == 0 then return nil, "Character bank tab slots are unavailable." end
         result.slotsTotal = result.slotsTotal + slots
         local totals = collectTotals and {} or nil
         for slot = 1, slots do
@@ -763,7 +770,7 @@ local function saveSnapshot(guid, export)
     return true
 end
 
-local function saveBagSnapshot(guid, export)
+local function saveBagSnapshot(guid, export, explicit)
     local data, storageError = storageRoot()
     if not data then return nil, storageError end
     local bagMap = data.bags
@@ -795,6 +802,11 @@ local function saveBagSnapshot(guid, export)
         return nil, "Saved bag history has an unsupported format; it was not overwritten."
     end
     local previous = last and last:match("^MHWOWB1|forever|%d+|(.*)$")
+    local currentItems = export:match("^MHWOWB1|forever|%d+|[^|]+|([^|]*)|%d+$")
+    local previousItems = last and last:match("^MHWOWB1|forever|%d+|[^|]+|([^|]*)|%d+$")
+    if currentItems == "" and previousItems and previousItems ~= "" and not explicit then
+        return nil, "Empty bag scan needs explicit confirmation."
+    end
     if details ~= previous then
         snapshots[#snapshots + 1] = export
         if #snapshots > 20 then table.remove(snapshots, 1) end
@@ -802,7 +814,7 @@ local function saveBagSnapshot(guid, export)
     return true
 end
 
-local function saveBankSnapshot(guid, export)
+local function saveBankSnapshot(guid, export, explicit)
     local data, storageError = storageRoot()
     if not data then return nil, storageError end
     local bankMap = data.bank
@@ -832,6 +844,12 @@ local function saveBankSnapshot(guid, export)
     if not details then return nil, "Saved bank export has an unsupported format." end
     local last = snapshots[count]
     local previous = last and last:match("^MHWOWK1|forever|%d+|(.*)$")
+    local currentItems = export:match("^MHWOWK1|forever|%d+|[^|]+|([^|]*)|%d+$")
+    local previousItems = last and last:match("^MHWOWK1|forever|%d+|[^|]+|([^|]*)|%d+$")
+    if currentItems and not currentItems:find(":%d+:%d+") and previousItems and
+        previousItems:find(":%d+:%d+") and not explicit then
+        return nil, "Empty bank scan needs explicit confirmation."
+    end
     if details ~= previous then
         snapshots[#snapshots + 1] = export
         if #snapshots > 20 then table.remove(snapshots, 1) end
@@ -1223,7 +1241,7 @@ local function captureLocally()
     refreshSettingsStatus()
 end
 
-local function captureBagsLocally()
+local function captureBagsLocally(explicit)
     if not inWorld then return end
     local settings = settingsRoot()
     if not settings then
@@ -1236,11 +1254,13 @@ local function captureBagsLocally()
     if combat == nil or combat then return end
     local ok, export, _, guid = pcall(MclarionWow_BuildBagExport)
     if ok and export and guid then
-        local saved, stored = pcall(saveBagSnapshot, guid, export)
+        local saved, stored, storageError = pcall(saveBagSnapshot, guid, export, explicit == true)
         if saved and stored then
             bagMessage = "Scanned; unchanged or held in memory until WoW saves."
         else
-            bagMessage = "Capture unavailable: local bag storage was refused."
+            bagMessage = storageError == "Empty bag scan needs explicit confirmation." and
+                "Empty result refused; check bags, then click Bags now if truly empty." or
+                "Capture unavailable: local bag storage was refused."
         end
     else
         bagMessage = "Capture unavailable: client refused the bag scan."
@@ -1248,7 +1268,7 @@ local function captureBagsLocally()
     refreshSettingsStatus()
 end
 
-local function captureBankLocally()
+local function captureBankLocally(explicit)
     if not inWorld then return end
     local settings = settingsRoot()
     if not settings then
@@ -1263,11 +1283,13 @@ local function captureBankLocally()
     -- before any slot is read for automatic capture.
     local ok, export, scanError, guid = pcall(MclarionWow_BuildBankExport)
     if ok and export and guid then
-        local saved, stored = pcall(saveBankSnapshot, guid, export)
+        local saved, stored, storageError = pcall(saveBankSnapshot, guid, export, explicit == true)
         if saved and stored then
             bankMessage = "Scanned; unchanged or held in memory until WoW saves."
         else
-            bankMessage = "Capture unavailable: local bank storage was refused."
+            bankMessage = storageError == "Empty bank scan needs explicit confirmation." and
+                "Empty result refused; check bank, then click Bank now if truly empty." or
+                "Capture unavailable: local bank storage was refused."
         end
     else
         bankMessage = scanError == "Character bank view is not active." and
@@ -1354,9 +1376,9 @@ captureNow = function(kind)
         return
     end
     if kind == "character" then captureLocally()
-    elseif kind == "bags" then captureBagsLocally()
+    elseif kind == "bags" then captureBagsLocally(true)
     elseif kind == "bank" then
-        if settings.autoBankCapture then captureBankLocally()
+        if settings.autoBankCapture then captureBankLocally(true)
         else
             bankMessage = "Bank totals off; item details only."
             refreshSettingsStatus()

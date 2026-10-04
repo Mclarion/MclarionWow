@@ -445,8 +445,8 @@ if type(MclarionWow_BuildBankExport) == "function" then
     expectTrue(sameData(MclarionWowData, expectedStorage),
         "building a bank export leaves nested saved data unchanged")
 
-    C_Container.GetContainerNumSlots = function() return 0 end
-    C_Container.GetContainerItemInfo = function() error("empty tabs must not read item slots") end
+    C_Container.GetContainerNumSlots = function() return 1 end
+    C_Container.GetContainerItemInfo = function() return nil end
     bankExport, bankError = MclarionWow_BuildBankExport()
     expectEqual(bankError, nil, "empty purchased character bank exports without error")
     expectEqual(bankExport, "MHWOWK1|forever|1720000000|Player-1234-ABCDEF12||70170",
@@ -537,7 +537,7 @@ if type(MclarionWow_BuildBankExport) == "function" then
         "more than the nine supported character-bank tabs fails closed")
 
     C_Bank.FetchPurchasedBankTabData = function() return { { ID = 6 } } end
-    C_Container.GetContainerNumSlots = function() return 0 end
+    C_Container.GetContainerNumSlots = function() return 1 end
     local oldTime, oldGuid, oldBuild = GetServerTime, UnitGUID, GetBuildInfo
     _G.GetServerTime = function() return 253402300800 end
     bankExport, bankError = MclarionWow_BuildBankExport()
@@ -1004,6 +1004,26 @@ if captureFrame then
     expectTrue(captureFrame.events.BAG_OPEN, "registers the player bag-open event")
     local bagSnapshots = MclarionWowData.bags and MclarionWowData.bags["Player-1234-ABCDEF12"]
     expectEqual(bagSnapshots and #bagSnapshots, 1, "entering the world stores a bag snapshot")
+    local filledSnapshot = bagSnapshots and bagSnapshots[1]
+    local availableSlots = C_Container.GetContainerNumSlots
+    C_Container.GetContainerNumSlots = function() return 0 end
+    local missingExport, missingReason = MclarionWow_BuildBagExport()
+    expectTrue(missingExport == nil and type(missingReason) == "string" and
+        missingReason:find("slots", 1, true) ~= nil,
+        "zero reported backpack slots refuse an uninitialized bag snapshot")
+    captureFrame.scripts.OnEvent(captureFrame, "BAG_UPDATE_DELAYED")
+    expectEqual(#bagSnapshots, 1, "zero-slot bag scan preserves populated history")
+    C_Container.GetContainerNumSlots = availableSlots
+    local occupiedItem = C_Container.GetContainerItemInfo
+    C_Container.GetContainerItemInfo = function() return nil end
+    local validEmpty, validEmptyError = MclarionWow_BuildBagExport()
+    expectTrue(type(validEmpty) == "string" and validEmptyError == nil and
+        validEmpty:find("||70170", 1, true) ~= nil,
+        "initialized empty backpack still produces a valid candidate export")
+    captureFrame.scripts.OnEvent(captureFrame, "BAG_UPDATE_DELAYED")
+    expectEqual(#bagSnapshots, 1, "automatic all-nil item scan cannot erase populated bags")
+    expectEqual(bagSnapshots[1], filledSnapshot, "earlier populated bag snapshot remains current")
+    C_Container.GetContainerItemInfo = occupiedItem
     local originalBagInfo = C_Container.GetContainerItemInfo
     now = now + 1
     C_Container.GetContainerItemInfo = function(bag, slot)
@@ -1081,7 +1101,7 @@ if captureFrame then
         GetActiveBankType = function() return Enum.BankType.Character end,
     }
     C_Bank.FetchPurchasedBankTabData = function() return { { ID = 6 }, { ID = 7 } } end
-    C_Container.GetContainerNumSlots = function(tab) return tab == 6 and 1 or 0 end
+    C_Container.GetContainerNumSlots = function(tab) return (tab == 6 or tab == 7) and 1 or 0 end
     C_Container.GetContainerItemInfo = function(tab)
         if tab == 6 then return { itemID = 4242, stackCount = 3 } end
     end
@@ -1091,6 +1111,31 @@ if captureFrame then
         history[1]:find("|6:4242:3|", 1, true) ~= nil,
         "opening own bank stores bounded character-bank totals in memory")
     if history then
+        C_Bank.FetchPurchasedBankTabData = function() return {} end
+        local noTabs, noTabsError = MclarionWow_BuildBankExport()
+        expectTrue(noTabs == nil and type(noTabsError) == "string" and
+            noTabsError:find("tabs", 1, true) ~= nil,
+            "uninitialized bank tabs cannot make an empty bank history")
+        captureFrame.scripts.OnEvent(captureFrame, "BANKFRAME_OPENED")
+        expectEqual(#history, 1, "uninitialized bank tabs preserve populated bank history")
+        C_Bank.FetchPurchasedBankTabData = function() return { { ID = 6 }, { ID = 7 } } end
+        C_Container.GetContainerNumSlots = function() return 0 end
+        local noSlots, noSlotsError = MclarionWow_BuildBankExport()
+        expectTrue(noSlots == nil and type(noSlotsError) == "string" and
+            noSlotsError:find("slots", 1, true) ~= nil,
+            "uninitialized bank slots cannot make an empty bank history")
+        captureFrame.scripts.OnEvent(captureFrame, "BANKFRAME_OPENED")
+        expectEqual(#history, 1, "uninitialized bank slots preserve populated bank history")
+        C_Container.GetContainerNumSlots = function(tab) return (tab == 6 or tab == 7) and 1 or 0 end
+        local occupiedBankItem = C_Container.GetContainerItemInfo
+        C_Container.GetContainerItemInfo = function() return nil end
+        local emptyBank, emptyBankError = MclarionWow_BuildBankExport()
+        expectTrue(type(emptyBank) == "string" and emptyBankError == nil and
+            emptyBank:find("||70170", 1, true) ~= nil,
+            "initialized empty bank tabs still produce a valid candidate export")
+        captureFrame.scripts.OnEvent(captureFrame, "BANKFRAME_OPENED")
+        expectEqual(#history, 1, "automatic all-nil bank scan cannot erase populated bank history")
+        C_Container.GetContainerItemInfo = occupiedBankItem
         C_Container.GetContainerItemInfo = function(tab)
             if tab == 6 then return { itemID = 4242, stackCount = 4 } end
         end
@@ -1373,7 +1418,7 @@ expectEqual(itemRecord and itemRecord.bags, bagPayload,
     "unchanged item details deduplicate despite a new timestamp")
 local oldItemSlots, oldItemContainer = C_Container.GetContainerNumSlots, C_Container.GetContainerItemInfo
 C_Container.GetContainerNumSlots = function(bag)
-    if bag == 6 then return 1 end
+    if bag == 6 or bag == 7 then return 1 end
     return oldItemSlots(bag)
 end
 C_Container.GetContainerItemInfo = function(bag, slot)
@@ -1411,7 +1456,7 @@ itemFrame.scripts.OnEvent(itemFrame, "BANKFRAME_OPENED")
 expectEqual(MclarionWowData.items[itemGuid].bank, twoPages,
     "a partially uncached later bank page does not replace the complete set")
 C_Item.GetItemInfo = cachedForPages
-C_Container.GetContainerNumSlots = function(tab) return tab == 6 and 1 or 0 end
+C_Container.GetContainerNumSlots = function(tab) return (tab == 6 or tab == 7) and 1 or 0 end
 C_Container.GetContainerItemInfo = function(tab, slot)
     if tab == 6 and slot == 1 then return { itemID = 4242, stackCount = 1 } end
 end
@@ -1532,7 +1577,18 @@ expectEqual(#MclarionWowData.bags[actionGuid], countWithoutMenu + 1,
 actionFrame.scripts.OnEvent(actionFrame, "BAG_UPDATE_DELAYED")
 expectEqual(#MclarionWowData.bags[actionGuid], countWithoutMenu + 1,
     "sorting unchanged bag totals adds no duplicate history")
+local beforeEmptyBag = #MclarionWowData.bags[actionGuid]
+C_Container.GetContainerItemInfo = function() return nil end
+actionFrame.scripts.OnEvent(actionFrame, "BAG_UPDATE_DELAYED")
+expectEqual(#MclarionWowData.bags[actionGuid], beforeEmptyBag,
+    "transient all-nil bag results cannot replace a populated snapshot automatically")
 actionPanel:Show()
+expectTrue(visibleStatus("Bags: Empty result refused"),
+    "bag status explains an automatic empty-result refusal")
+actions["Bags now"].scripts.OnClick(actions["Bags now"])
+expectEqual(#MclarionWowData.bags[actionGuid], beforeEmptyBag + 1,
+    "explicit Bags now can confirm a genuinely empty inventory")
+C_Container.GetContainerItemInfo = bagInfoBeforeAction
 MclarionWowData.settings.autoBagCapture = false
 local countWhileDisabled = #MclarionWowData.bags[actionGuid]
 actions["Bags now"].scripts.OnClick(actions["Bags now"])
@@ -1559,7 +1615,7 @@ BankFrame.bankType = bankTypeBeforeAction
 local slotsBeforeBankAction = C_Container.GetContainerNumSlots
 local infoBeforeBankAction = C_Container.GetContainerItemInfo
 C_Container.GetContainerNumSlots = function(tab)
-    if tab == 6 then return 1 end
+    if tab == 6 or tab == 7 then return 1 end
     return slotsBeforeBankAction(tab)
 end
 C_Container.GetContainerItemInfo = function(tab, slot)
@@ -1570,6 +1626,20 @@ actions["Bank now"].scripts.OnClick(actions["Bank now"])
 local capturedBank = MclarionWowData.bank and MclarionWowData.bank[actionGuid]
 expectTrue(capturedBank and #capturedBank == 1 and visibleStatus("Bank: Scanned"),
     "Bank now captures own-bank totals once the character-bank view is active")
+local beforeEmptyBank = #capturedBank
+C_Container.GetContainerItemInfo = function() return nil end
+actionFrame.scripts.OnEvent(actionFrame, "BANKFRAME_OPENED")
+expectEqual(#capturedBank, beforeEmptyBank,
+    "transient all-nil bank results cannot replace a populated snapshot automatically")
+expectTrue(visibleStatus("Bank: Empty result refused"),
+    "bank status explains an automatic empty-result refusal")
+actions["Bank now"].scripts.OnClick(actions["Bank now"])
+expectEqual(#capturedBank, beforeEmptyBank + 1,
+    "explicit Bank now can confirm a genuinely empty character bank")
+C_Container.GetContainerItemInfo = function(tab, slot)
+    if tab == 6 and slot == 1 then return { itemID = 4242, stackCount = 1 } end
+    return infoBeforeBankAction(tab, slot)
+end
 MclarionWowData.settings.autoBankCapture = false
 MclarionWowData.items[actionGuid] = nil
 actions["Bank now"].scripts.OnClick(actions["Bank now"])

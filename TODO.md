@@ -1,5 +1,14 @@
 # MclarionWow handoff TODO — 2026-10-04
 
+**0.11.2 candidate:** A player-reported subsequent scan restored the affected character's bag display. Earlier imported payloads contained a populated snapshot followed by an empty latest snapshot; the source of the empty scan remains unproven. Regression tests reproduce a failure mode in 0.11.1: zero/uninitialized bag or bank views, or transient all-nil item reads, could append an empty state over a known populated one. Candidate guards preserve history for automatic scans and let a player explicitly confirm genuine emptiness after inspecting the visible bags/bank. No schema or wire changes; 281 mocked assertions pass, with live behavior and release pending.
+
+## 0.11.2 safety release checks
+
+- [x] Add red/green mocked regressions for zero-slot and all-nil bag/bank views plus explicit confirmation of genuine empty inventories.
+- [x] Lua syntax, 281-assertion mock suite, both synthetic bank fixtures and diff checks passed; publish only audited addon files and handoff.
+- [ ] If WoW is stopped, install with backup and separate version/hash readback. Never touch game-written SavedVariables.
+- [ ] Ask for one in-game status check; do not assert the empty-snapshot cause or an in-game fix from mocks.
+
 **0.11.1 installed:** the player clarified that the missing buttons should be **capture-now controls**, not restored clipboard exports. Installed code `d7507b9` adds four buttons that reuse validated scanners while preserving schema and opt-ins. WoW was stopped during installation; a separate readback verified both installed hashes and a recoverable 0.11.0 backup. The menu need not stay open, loot/bag updates rescan automatically, unchanged item totals deduplicate, and own-bank opening rescans only when the character-bank tab is already active. Mock tests pass 264 assertions and both synthetic bank fixtures pass; **live 0.11.1 layout/button checks remain pending**.
 
 ## 0.11.1 release checks
