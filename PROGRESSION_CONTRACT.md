@@ -2,7 +2,7 @@
 
 ## Schema-3 draft handoff — no writer
 
-**0.11.10 dry-run candidate, not a contract change:** `/mhwowmigrationpreflight` deep-clones a structurally supported schema-2 root, applies only the empty schema-3 skeleton with both capture settings disabled, projects the candidate, reports aggregate bytes, and discards it. It does not collect quest/reputation rows, validate all legacy wire semantics, assign schema 3, serialize a file, or close the writer/importer gates.
+**0.11.10 installed dry run; live command pending, not a contract change (5 October 2026):** `/mhwowmigrationpreflight` deep-clones a structurally supported schema-2 root, applies only the empty schema-3 skeleton with both capture settings disabled, projects the candidate, reports aggregate bytes, and discards it. Public source/install hashes and version matched with WoW stopped; independent rereview found no concrete release-blocking issue. It does not collect quest/reputation rows, validate all legacy wire semantics, assign schema 3, serialize a file, or close the writer/importer gates.
 
 **0.11.9 live diagnostic observed (player screenshot, 5 October 2026), not a contract change:** `/mhwowsizeprobe` reported **300632/3000000 projected bytes (not actual file bytes); no data saved** and did not refuse. The same aggregate projection was measured for the earlier stopped-game sample; equality does not prove identical saved contents or current disk bytes. It is not actual serialization, schema-3 migration, per-record provenance, or full-file upload proof. It never saves progression. Do not ask for an unchanged repeat.
 
