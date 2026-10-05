@@ -1,5 +1,14 @@
 # MclarionWow handoff TODO — 2026-10-05
 
+## Next implementation scope: importer acceptance before any writer
+
+- [x] Freeze the test-only schema-3 proposal in `PROGRESSION_SCHEMA3_DRAFT.md`: exact `MHWOWQ1` active-log and `MHWOWR1` visible-reputation records, independent default-off settings, partial-observation labels, 20 records/category/owner, 256 owners, 2 MiB aggregate wires, and timestamp-independent adjacent-state deduplication.
+- [x] Add a fabricated schema-3 fixture and executable reference validator. The suite accepts canonical and empty observations and rejects bad owner binding, noncanonical/duplicate/unsorted IDs, count and standing interval mismatches, malformed delimiters, sparse/backwards/overlong histories, unknown categories, excess owners and excess bytes. It changes no runtime addon code.
+- [ ] Website importer thread: extend the data-only SavedVariables reader from schemas 1–2 to 1–3, parse both wires strictly, preserve category isolation and partial-observation semantics, and prove same-file reimport adds zero observations. Do not deploy merely because the reference fixture passes.
+- [ ] Desktop importer thread: independently implement the same schema/wire checks and idempotent readback. Do not share a permissive parser that could make both importers accept the same malformed input.
+- [ ] Known fail-closed integration points are `src/Mclarion.Home/Features/Wow/WowAddonSnapshotReader.cs` and `vaultkeeper-client/AddonSnapshotReader.cs`: both explicitly accept only schema 1/2 and the existing root/settings keys. Do not merely permit integer `3`; preserve the old validators, add strict progression parsing, and return typed partial-observation records.
+- [ ] Only after both importers pass their fabricated valid/invalid fixtures: implement separate first-run-off addon switches and manual capture-now controls, atomic schema-2-to-3 migration, bounded histories, and fail-closed scans. Revalidate faction header-with-reputation and collapsed-header behavior before automatic reputation capture.
+
 ## Completed live gate: namespaced progression compatibility (0.11.7)
 
 - [x] Match a public extraction of Forever 1.60.1 build 70205 generated quest/reputation API signatures to the previously observed namespaced getter presence. This is source evidence, **not** proof of current runtime behavior.
