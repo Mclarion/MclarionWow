@@ -2,7 +2,7 @@
 
 ## Schema-3 draft handoff — no writer
 
-**0.11.9 diagnostic candidate, not a contract change:** `/mhwowsizeprobe` would report an aggregate projection of the current schema-1/2 SavedVariables root in memory. It is not actual serialized bytes, schema-3 migration, per-record provenance, or full-file upload proof. It never saves progression; a live Forever-client result is still required.
+**0.11.9 installed diagnostic, not a contract change:** `/mhwowsizeprobe` reports an aggregate projection of the current schema-1/2 SavedVariables root in memory. It is not actual serialized bytes, schema-3 migration, per-record provenance, or full-file upload proof. It never saves progression; a live Forever-client result is still required.
 
 **Test-only preflight reference:** `tests/schema3_preflight.lua` deep-clones synthetic populated schema-2 data, applies draft progression/default-off settings, validates the draft root and provisional whole-file projection, and refuses invalid or oversized candidates without changing either input. `tests/test_schema3_preflight.lua` checks both bank-array encodings and exact second-page preservation. This is not runtime migration, live account-wide provenance or complete legacy-payload validation; actual writer gates remain open.
 
