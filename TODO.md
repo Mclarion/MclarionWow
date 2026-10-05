@@ -3,7 +3,7 @@
 ## Combined candidate test delivery
 
 - [x] Combine all six categories in the two-addon package; fix the two honor/title review blockers and rebuild verified source-matched archive.
-- [ ] Publish audited combined source, anonymously verify all runtime bytes, install both addon folders while WoW is stopped with rollback backup, and read back all files/enablement.
+- [x] Published runtime `4de45204b003d5062a39857566171e325a235a4d` and anonymously verified all runtime bytes; installed both 0.12.0-candidate addon folders with WoW stopped. Separate readback verified seven file hashes, four enabled state files, both versions and the exact 0.11.11 rollback copy. Synthetic paired installer passed refusal, rollback and success scenarios. No player-save reads/writes.
 - [ ] Complete one in-game capture/normal-exit test using `IN_GAME_CHECK.md`; no repeated migration diagnostic. Live persistence and later-restart survival remain unverified.
 
 ## Unreleased six-category companion candidate
