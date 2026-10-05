@@ -990,14 +990,51 @@ if type(MclarionWow_ProbeSchema3Preflight) == "function" then
         local report, problem = MclarionWow_ProbeSchema3Preflight()
         expectTrue(problem == nil and report and report:find(tostring(projected), 1, true) and
             report:find("not actual file bytes", 1, true) and
+            report:find("item records checked", 1, true) and
             report:find("No data saved.", 1, true) and
             report:find("Player-", 1, true) == nil and sameData(source, original) and
             #source.items["Player-1234-ABCDEF12"].bank == 2,
             "migration preflight projects the preserved two-page fixture and remains read-only")
     end
+    local emptyItemRecord = loadMigrationFixture("schema2-synthetic.lua")
+    emptyItemRecord.items["Player-1234-ABCDEF12"] = {}
+    MclarionWowData = emptyItemRecord
+    local emptyItemBefore = copyMigrationTable(emptyItemRecord)
+    local report, problem = MclarionWow_ProbeSchema3Preflight()
+    expectTrue(report == nil and problem and
+        problem:find("item", 1, true) ~= nil and
+        sameData(MclarionWowData, emptyItemBefore),
+        "migration preflight refuses an empty item owner without mutating the source")
+    for _, case in ipairs({
+        { "empty bank pages", function(data) data.items["Player-1234-ABCDEF12"] = { bank = {} } end },
+        { "missing middle bank page", function(data)
+            local pages = data.items["Player-1234-ABCDEF12"].bank
+            pages[3], pages[2] = pages[2], nil
+        end },
+        { "foreign item owner", function(data)
+            local record = data.items["Player-1234-ABCDEF12"]
+            record.bank[2] = record.bank[2]:gsub("Player%-1234%-ABCDEF12", "Player-9999-ABCDEF12")
+        end },
+        { "malformed item wire", function(data)
+            local record = data.items["Player-1234-ABCDEF12"]
+            record.bank[2] = record.bank[2] .. "|extra"
+        end },
+        { "unknown item category", function(data)
+            data.items["Player-1234-ABCDEF12"].other = "synthetic"
+        end },
+    }) do
+        local damaged = loadMigrationFixture("schema2-synthetic.lua")
+        case[2](damaged)
+        local before = copyMigrationTable(damaged)
+        MclarionWowData = damaged
+        report, problem = MclarionWow_ProbeSchema3Preflight()
+        expectTrue(report == nil and problem and problem:find("item", 1, true) ~= nil and
+            sameData(damaged, before),
+            "migration preflight refuses " .. case[1] .. " without mutating the source")
+    end
     MclarionWowData = { schema = 2, characters = {}, items = {},
         settings = { autoCombatLog = false }, progression = {} }
-    local report, problem = MclarionWow_ProbeSchema3Preflight()
+    report, problem = MclarionWow_ProbeSchema3Preflight()
     expectTrue(report == nil and problem and problem:find("already", 1, true) and
         MclarionWowData.schema == 2,
         "existing progression root refuses without changing schema 2")

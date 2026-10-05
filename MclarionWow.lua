@@ -1149,6 +1149,46 @@ local function migrationTable(value, label, optional)
     return true
 end
 
+local validItemPayload -- shared with the existing schema-2 item writer below
+
+local function migrationItemRecords(items)
+    local owners, bytes = 0, 0
+    for owner, record in pairs(items) do
+        if type(owner) ~= "string" or #owner > 77 or
+            not owner:match("^Player%-[A-Za-z0-9%-]+$") or
+            type(record) ~= "table" then return false end
+        owners = owners + 1
+        if owners > 256 then return false end
+        local fields = 0
+        for source, value in pairs(record) do
+            fields = fields + 1
+            if source == "bags" then
+                if not validItemPayload(value, owner) then return false end
+                bytes = bytes + #value
+            elseif source == "bank" then
+                if type(value) ~= "table" then return false end
+                local pages = 0
+                for page, payload in pairs(value) do
+                    if type(page) ~= "number" or page < 1 or page > 9 or
+                        page ~= math.floor(page) or
+                        not validItemPayload(payload, owner) then return false end
+                    pages = pages + 1
+                    bytes = bytes + #payload
+                end
+                if pages == 0 then return false end
+                for page = 1, pages do
+                    if rawget(value, page) == nil then return false end
+                end
+            else
+                return false
+            end
+            if bytes > 1048576 then return false end
+        end
+        if fields == 0 then return false end
+    end
+    return true
+end
+
 local function buildSchema3DryRun()
     local combat, combatError = combatStatus()
     if combat == nil then return nil, nil, combatError end
@@ -1212,6 +1252,9 @@ local function buildSchema3DryRun()
     end
     local candidate, cloneReason = cloneSavedGraph(source, 0, {}, { nodes = 0 })
     if not candidate then return nil, nil, "Schema-2 clone refused (" .. cloneReason .. ")." end
+    if not migrationItemRecords(candidate.items) then
+        return nil, nil, "Schema-2 item records have an unsupported format."
+    end
     candidate.schema = 3
     if candidate.settings == nil then candidate.settings = {} end
     candidate.settings.autoQuestCapture = false
@@ -1228,7 +1271,8 @@ function MclarionWow_ProbeSchema3Preflight()
     local _, projected, reason = buildSchema3DryRun()
     if not projected then return nil, reason end
     return string.format("Schema-3 dry-run projected %d/3000000 bytes " ..
-        "(not actual file bytes). No data saved.", projected)
+        "(not actual file bytes; item records checked, other legacy histories not validated). " ..
+        "No data saved.", projected)
 end
 
 function MclarionWow_ProbeSavedSize()
@@ -1455,7 +1499,7 @@ local function saveBankSnapshot(guid, export, explicit)
 end
 
 -- One latest copy per source; older numeric histories remain unchanged.
-local function validItemPayload(value, guid)
+validItemPayload = function(value, guid)
     if isSecret(value) or type(value) ~= "string" or #value > 32768 then return false end
     local stamp, owner, build, locale, entries =
         value:match("^MHWOWI1|forever|(%d+)|([^|]+)|(%d+)|([^|]+)|([^|]+)$")
