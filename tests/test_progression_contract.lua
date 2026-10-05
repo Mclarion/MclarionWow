@@ -31,6 +31,31 @@ assert(contract.parseReputation(reputation:gsub("1200;", "4000;"), guid) == nil,
     "standing value must remain within its interval")
 assert(contract.parseReputation(reputation:gsub("100:4", "200:4"), guid) == nil,
     "faction IDs must be strictly ascending")
+local observed = {
+    { id = 200, isAccountWide = false },
+    { id = 100, isAccountWide = false }, -- UI order need not be wire order
+}
+local function scoped(leaves, wire)
+    return contract.characterReputationEligible(leaves, wire or reputation, guid)
+end
+assert(scoped(observed), "each verified character leaf matches the proposed R1 IDs")
+local emptyWire = "MHWOWR1|forever|1720000003|" .. guid ..
+    "|70205|visible-ui|0|0|0|0|"
+assert(scoped({}, emptyWire), "empty visible leaf set is scoped")
+assert(scoped({ observed[1], { id = 100, isAccountWide = true } }) == nil,
+    "one account-wide leaf refuses the entire proposed R1 observation")
+assert(scoped({ observed[1], { id = 100 } }) == nil,
+    "unclassifiable provenance refuses the entire category")
+assert(scoped({ [1] = observed[1], [3] = observed[2] }) == nil,
+    "internally missing leaf index cannot be silently truncated")
+assert(scoped({ [1] = observed[1], note = observed[2] }) == nil,
+    "mixed numeric/string leaf keys are refused")
+assert(scoped({ observed[1], observed[2], observed[1] }) == nil,
+    "extra leaves beyond the record count are refused")
+assert(scoped({ observed[1], { id = 300, isAccountWide = false } }) == nil,
+    "provenance must bind to the actual wire faction IDs")
+assert(scoped({ observed[1], observed[1] }) == nil,
+    "duplicate observed faction IDs cannot fill two record entries")
 local emptyQuest = "MHWOWQ1|forever|1720000002|" .. guid ..
     "|70205|active-log|0|0|"
 local emptyReputation = "MHWOWR1|forever|1720000003|" .. guid ..

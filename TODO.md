@@ -2,6 +2,10 @@
 
 ## Addon-only next scope: Forever API evidence and writer safety
 
+- [x] Add test-only **whole-root** size projection against both populated bank-array spellings and composed schema-3 roots; reject oversized escaped strings, cycles and unsupported keys. The provisional 3,000,000-byte envelope is **not** calibrated against Forever's SavedVariables serializer and does not close the 4 MB upload gate.
+- [x] Make the test-only `MHWOWR1` precondition ID-bound: all visible faction IDs must match the proposed wire and be verified non-account-wide; one true/missing/malformed/mismatched leaf refuses the entire category. The live 0.11.8 screenshot classifies seven visible leaves as character-scoped in **that view only**.
+- [ ] Before any writer, verify real serializer overhead on a bounded, consented, **stopped-game** save without printing player data; establish a defensible whole-file bound, then prove failed preflight leaves schema-2 histories byte-for-byte unchanged. Actual migration remains unimplemented.
+
 **New visual scope:** `CAST_TIMELINE_DRAFT.md` defines the requested two-mark timed-cast display—Cast start and Cast end joined by a caster-faction-colored line, with Hit/Miss/Dodge at the terminal mark only when an outcome is actually matched. This is not a combat-log parser, timeline renderer or game-tested feature; native logging remains separate. Next gate: privately verify Forever cast event shapes, pairing and faction evidence before defining a bounded event contract.
 
 **0.11.8 live current-view gate passed (player screenshot, 5 October 2026):** `/mhwowprogresssafety` returned **quest stable 10/12; reputation stable character 7, account-wide 0 (9 visible rows); no progression data saved**. Two guarded passes matched for this view, with accessible per-leaf account-wide flags; no refusal. Mock regressions (347 assertions), independent `gpt-6-sol` review, source/install hash readback and 0.11.7 backup are separate verified gates. UI mutation, hidden/account-wide rows, other states and atomicity remain untested. No writer or new saved keys.

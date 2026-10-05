@@ -108,6 +108,38 @@ function Contract.parseReputation(text, guid)
         collapsed = collapsed, timestamp = stamp, build = build, guid = guid }
 end
 
+-- Test-only source precondition for the five-field, character-only MHWOWR1.
+-- A writer still needs independent secret-value and stable-scan guards.
+function Contract.characterReputationEligible(leaves, wire, guid)
+    local parsed = Contract.parseReputation(wire, guid)
+    if not parsed or type(leaves) ~= "table" or getmetatable(leaves) ~= nil then
+        return nil, "invalid provenance"
+    end
+    local count, seen, ids = #parsed.entries, 0, {}
+    for index, leaf in pairs(leaves) do
+        if type(index) ~= "number" or index ~= math.floor(index) or
+            index < 1 or index > count or type(leaf) ~= "table" or
+            getmetatable(leaf) ~= nil then return nil, "invalid provenance" end
+        for key in pairs(leaf) do
+            if key ~= "id" and key ~= "isAccountWide" then
+                return nil, "invalid provenance"
+            end
+        end
+        local id, accountWide = leaf.id, leaf.isAccountWide
+        if type(id) ~= "number" or id ~= math.floor(id) or id < 1 or
+            id > 2147483647 or ids[id] then return nil, "invalid faction ID" end
+        if type(accountWide) ~= "boolean" then return nil, "unknown provenance" end
+        if accountWide then return nil, "account-wide leaf" end
+        ids[id] = true
+        seen = seen + 1
+    end
+    if seen ~= count then return nil, "incomplete provenance" end
+    for _, entry in ipairs(parsed.entries) do
+        if not ids[entry.id] then return nil, "mismatched faction ID" end
+    end
+    return true
+end
+
 function Contract.stateKey(text)
     if type(text) ~= "string" then return nil end
     local fields = split(text, "|")
