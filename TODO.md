@@ -2,9 +2,10 @@
 
 ## Addon-only next scope: Forever API evidence and writer safety
 
-- [x] Add test-only **whole-root** size projection against both populated bank-array spellings and composed schema-3 roots; reject oversized escaped strings, cycles and unsupported keys. The provisional 3,000,000-byte envelope is **not** calibrated against Forever's SavedVariables serializer and does not close the 4 MB upload gate.
+- [x] With WoW stopped and consent, compare one game-written file's aggregate size (67,294 bytes) with its data-only whole-root projection (300,632 bytes); four fabricated fixtures matched the reference estimator. No records or identifiers were reported or retained. **One sample is not a worst-case serializer bound.**
+- [x] Add test-only **whole-root** size projection against both populated bank-array spellings and composed schema-3 roots; reject oversized escaped strings, cycles and unsupported keys. One stopped-game sample matched its conservative projection, but the provisional 3,000,000-byte envelope is **not worst-case calibrated** against Forever's SavedVariables serializer and does not close the 4 MB upload gate.
 - [x] Make the test-only `MHWOWR1` precondition ID-bound: all visible faction IDs must match the proposed wire and be verified non-account-wide; one true/missing/malformed/mismatched leaf refuses the entire category. The live 0.11.8 screenshot classifies seven visible leaves as character-scoped in **that view only**.
-- [ ] Before any writer, verify real serializer overhead on a bounded, consented, **stopped-game** save without printing player data; establish a defensible whole-file bound, then prove failed preflight leaves schema-2 histories byte-for-byte unchanged. Actual migration remains unimplemented.
+- [ ] Before any writer, establish a defensible **worst-case** whole-file bound under the 4 MB upload gate beyond the single stopped-game sample; prove failed preflight preserves populated schema-2 histories byte-for-byte around actual migration logic. Actual migration remains unimplemented.
 
 **New visual scope:** `CAST_TIMELINE_DRAFT.md` defines the requested two-mark timed-cast display—Cast start and Cast end joined by a caster-faction-colored line, with Hit/Miss/Dodge at the terminal mark only when an outcome is actually matched. This is not a combat-log parser, timeline renderer or game-tested feature; native logging remains separate. Next gate: privately verify Forever cast event shapes, pairing and faction evidence before defining a bounded event contract.
 
