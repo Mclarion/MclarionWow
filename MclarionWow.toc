@@ -1,9 +1,9 @@
 ## Interface: 16001
 ## AllowLoadGameType: camelot
 ## Title: MclarionWow
-## Notes: Opt-in Forever snapshots, capture-now controls, own-bank details, and minimap settings.
+## Notes: Opt-in Forever snapshots; quest controls require MclarionWowProgression.
 ## Author: Mclarion
-## Version: 0.11.11
+## Version: 0.12.0-candidate
 ## SavedVariables: MclarionWowData
 
 MclarionWow.lua

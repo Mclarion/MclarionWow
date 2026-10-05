@@ -102,8 +102,20 @@ assert(contract.validateRoot(duplicateState) == nil,
 root.settings.autoQuestCapture = "false"
 assert(contract.validateRoot(root) == nil, "progression opt-ins must be booleans")
 
-local fixtureEnv = {}
-assert(loadfile("tests/schema3-progression-synthetic.lua", "t", fixtureEnv))()
+local function loadFixture()
+    local environment = {}
+    local path = "tests/schema3-progression-synthetic.lua"
+    local chunk
+    if setfenv then
+        chunk = assert(loadfile(path))
+        setfenv(chunk, environment)
+    else
+        chunk = assert(loadfile(path, "t", environment))
+    end
+    chunk()
+    return assert(environment.MclarionWowData)
+end
+local fixtureEnv = { MclarionWowData = loadFixture() }
 assert(contract.validateRoot(fixtureEnv.MclarionWowData),
     "fabricated schema-3 progression fixture must match the reference validator")
 assert(fixtureEnv.MclarionWowData.settings.autoQuestCapture == false and
@@ -118,9 +130,7 @@ fixtureEnv.MclarionWowData.progression[guid].quests = tooLong
 assert(contract.validateRoot(fixtureEnv.MclarionWowData) == nil,
     "progression history cannot exceed twenty observations")
 local function fixtureRoot()
-    local environment = {}
-    assert(loadfile("tests/schema3-progression-synthetic.lua", "t", environment))()
-    return environment.MclarionWowData
+    return loadFixture()
 end
 local sparse = fixtureRoot()
 sparse.progression[guid].quests = { [1] = quest, [3] = emptyQuest }

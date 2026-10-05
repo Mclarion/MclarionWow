@@ -1,5 +1,19 @@
 # MclarionWow handoff TODO — 2026-10-05
 
+## Combined candidate test delivery
+
+- [x] Combine all six categories in the two-addon package; fix the two honor/title review blockers and rebuild verified source-matched archive.
+- [ ] Publish audited combined source, anonymously verify all runtime bytes, install both addon folders while WoW is stopped with rollback backup, and read back all files/enablement.
+- [ ] Complete one in-game capture/normal-exit test using `IN_GAME_CHECK.md`; no repeated migration diagnostic. Live persistence and later-restart survival remain unverified.
+
+## Unreleased six-category companion candidate
+
+- [x] Keep schema-1 quest/reputation roots separate from installed schema-2 legacy root; manual Quests now/Reputation now and independent default-off automation remain. Bounded, guarded repeat scans and provenance refusals are exercised offline.
+- [x] Integrate money in copper, visible currency balances separated by character/account scope, supported PvP counters/rank and selected/known titles into `WealthCapture.lua` and `HonorTitleCapture.lua`. Add Gold now, Currencies now, Honor now and Titles now plus four independent default-off auto switches on a readable second settings tab. Automatic retries use world entry, post-combat and the 300-second timer only; no speculative new event. Actual Forever runtime behavior and game-written persistence remain unverified.
+- [x] Preserve legacy single-global `MclarionWowData` declaration; dependent companion declares all four globals in its distinct file. Each writer's budget callback charges all five roots, candidate once, and refusal preserves old roots. The deterministic ZIP allowlists seven exact-source runtime files and verifies TOCs. This is a **provisional structural** 3,000,000-byte limit, not a worst-case serializer/upload guarantee.
+- [x] Combined offline review, full twelve-file Lua 5.1/5.4 suite and two Python package tests passed; deterministic seven-file ZIP readback and repeated-build hash match. This is one offline artifact, not a verified live SavedVariables handoff. No install, publication, player-save reads or consumer edits in this task.
+- [ ] After separate authorization, test real client captures and ordinary WoW save/exit, checking bounded aggregates only while stopped. Add companion consumer support before any import; do not select the companion file for existing import. Independently justify actual game-file size envelope before any upload proposal.
+
 ## Addon-only next scope: Forever API evidence and writer safety
 
 - [x] Publish a current, code-traced inventory of every installed 0.11.11 addon save and its auto/manual trigger in README and `DATA_STORAGE.md`, then mirror the storage handoff for other threads. The 0.11.11 live preflight added no saved data or automatic transfer.

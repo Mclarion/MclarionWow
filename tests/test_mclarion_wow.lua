@@ -142,6 +142,8 @@ _G.CreateFrame = function(frameType, name, parent, template)
         local fontString = {}
         function fontString:SetPoint() end
         function fontString:SetText(text) self.text = text end
+        function fontString:Show() self.shown = true end
+        function fontString:Hide() self.shown = false end
         self.fontStrings = self.fontStrings or {}
         self.fontStrings[#self.fontStrings + 1] = fontString
         return fontString
@@ -160,7 +162,12 @@ if not chunk then
     io.stderr:write("FAIL: addon loads: " .. tostring(loadError) .. "\n")
     os.exit(1)
 end
+-- WoW loads the dependency first, then the companion's source copied by packaging.
 chunk("MclarionWow", {})
+assert(loadfile("../QuestCapture.lua"))()
+assert(loadfile("../ReputationCapture.lua"))()
+assert(loadfile("../WealthCapture.lua"))()
+assert(loadfile("../HonorTitleCapture.lua"))()
 
 local minimapButton
 for _, frame in ipairs(frames) do
@@ -2078,8 +2085,8 @@ if type(SlashCmdList.MCLARIONWOWUI) == "function" then
             checkboxes[#checkboxes + 1] = frame
         end
     end
-    expectEqual(#checkboxes, 5, "settings expose logging, character, bag, bank and item switches")
-    if #checkboxes == 5 then
+    expectEqual(#checkboxes, 11, "settings expose seven original and four new switches")
+    if #checkboxes == 11 then
         checkboxes[1]:SetChecked(false)
         checkboxes[1].scripts.OnClick(checkboxes[1])
         expectEqual(settings.autoCombatLog, false, "logging preference persists in saved variables")
@@ -2519,6 +2526,352 @@ local safeButton = pcall(actions["Bags now"].scripts.OnClick, actions["Bags now"
 expectTrue(safeButton and visibleStatus("Bags: Capture unavailable: client refused requested scan"),
     "capture-now button contains a client API refusal and reports it without a Lua error")
 _G.InCombatLockdown = combatBeforeAction
+
+-- Companion may be disabled: no quest entry point may throw or alter storage.
+local savedQuestCapture, savedQuestEnabled, savedQuestToggle =
+    MclarionWow_CaptureQuests, MclarionWow_QuestAutoEnabled, MclarionWow_SetAutoQuestCapture
+MclarionWow_CaptureQuests, MclarionWow_QuestAutoEnabled, MclarionWow_SetAutoQuestCapture = nil, nil, nil
+local unavailableQuestRoot = MclarionWowQuestData
+local unavailableLegacyRoot = MclarionWowData
+local unavailableCheckbox, checkboxIndex = nil, 0
+for _, frame in ipairs(frames) do
+    if frame.parent == actionPanel and frame.frameType == "CheckButton" then
+        checkboxIndex = checkboxIndex + 1
+        if checkboxIndex == 6 then unavailableCheckbox = frame end
+    end
+end
+unavailableCheckbox:SetChecked(true)
+expectTrue(pcall(unavailableCheckbox.scripts.OnClick, unavailableCheckbox),
+    "missing companion quest checkbox refuses without a Lua error")
+expectEqual(unavailableCheckbox:GetChecked(), false,
+    "missing companion cannot leave the quest checkbox apparently enabled")
+expectTrue(visibleStatus("Quests: Companion addon unavailable"),
+    "quest status explains the missing companion")
+expectTrue(pcall(actions["Quests now"].scripts.OnClick, actions["Quests now"]),
+    "missing companion manual quest button refuses without a Lua error")
+expectTrue(visibleStatus("Quests: Companion addon unavailable"),
+    "manual quest refusal identifies the missing companion")
+expectEqual(MclarionWowQuestData, unavailableQuestRoot,
+    "missing companion cannot write quest storage")
+expectEqual(MclarionWowData, unavailableLegacyRoot,
+    "missing companion cannot change legacy storage")
+MclarionWow_CaptureQuests, MclarionWow_QuestAutoEnabled, MclarionWow_SetAutoQuestCapture =
+    savedQuestCapture, savedQuestEnabled, savedQuestToggle
+
+-- Exercise dependency-first companion loading through the settings panel and event hook.
+local oldQuestApi = C_QuestLog
+local oldReputationApi = C_Reputation
+local standing = 1200
+_G.C_Reputation = {GetNumFactions = function() return 2 end,
+    GetFactionDataByIndex = function(i)
+        if i == 1 then return {isHeader=true,isHeaderWithRep=false,isCollapsed=false,name="Synthetic header"} end
+        return {isHeader=false,isHeaderWithRep=false,isCollapsed=false,factionID=100,
+            reaction=4,currentReactionThreshold=0,nextReactionThreshold=3000,
+            currentStanding=standing,isAccountWide=false}
+    end}
+local questId = 31
+_G.C_QuestLog = {
+    GetNumQuestLogEntries = function() return 2 end,
+    GetInfo = function(index)
+        if index == 1 then return { isHeader = true, questLogIndex = 1, title = "Synthetic zone" } end
+        return { isHeader = false, questLogIndex = 2, questID = questId }
+    end,
+}
+MclarionWowQuestData = nil
+MclarionWowReputationData = nil
+local legacyRoot = MclarionWowData
+expectEqual(MclarionWow_ReputationAutoEnabled(), false, "reputation auto starts off independently")
+actionFrame.scripts.OnEvent(actionFrame, "UPDATE_FACTION")
+expectEqual(MclarionWowReputationData, nil, "faction event alone cannot opt in")
+expectTrue(actions["Reputation now"] ~= nil, "manual reputation action visible")
+actions["Reputation now"].scripts.OnClick(actions["Reputation now"])
+expectTrue(MclarionWowReputationData and #MclarionWowReputationData.characters[actionGuid] == 1,
+    "manual reputation observation saved with auto off")
+expectTrue(visibleStatus("Reputation: Scanned"), "manual reputation status visible")
+expectEqual(MclarionWowData, legacyRoot, "reputation does not change legacy root")
+local repCheckbox, repIndex = nil, 0
+for _, frame in ipairs(frames) do
+    if frame.parent == actionPanel and frame.frameType == "CheckButton" then
+        repIndex = repIndex + 1
+        if repIndex == 7 then repCheckbox = frame end
+    end
+end
+repCheckbox:SetChecked(true)
+repCheckbox.scripts.OnClick(repCheckbox)
+expectEqual(MclarionWow_ReputationAutoEnabled(), true, "reputation opt-in independent")
+standing = 1201
+now = now + 1
+actionFrame.scripts.OnEvent(actionFrame, "UPDATE_FACTION")
+expectEqual(#MclarionWowReputationData.characters[actionGuid], 2, "faction event records changed state")
+local repRoot = MclarionWowReputationData
+actionFrame.scripts.OnEvent(actionFrame, "UPDATE_FACTION")
+expectEqual(MclarionWowReputationData, repRoot, "unchanged faction event deduplicates")
+standing = 1203
+now = now + 1
+actionFrame.scripts.OnUpdate(actionFrame, 300)
+expectEqual(#MclarionWowReputationData.characters[actionGuid], 3,
+    "periodic retry captures changed reputation when opted in")
+repCheckbox:SetChecked(false)
+repCheckbox.scripts.OnClick(repCheckbox)
+expectEqual(MclarionWow_ReputationAutoEnabled(), false, "reputation opt-out saved")
+repRoot = MclarionWowReputationData
+standing = 1202
+now = now + 1
+actionFrame.scripts.OnEvent(actionFrame, "UPDATE_FACTION")
+expectEqual(MclarionWowReputationData, repRoot, "opted-out faction event cannot save")
+local repCapture, repEnabled, repToggle = MclarionWow_CaptureReputation,
+    MclarionWow_ReputationAutoEnabled, MclarionWow_SetAutoReputationCapture
+MclarionWow_CaptureReputation, MclarionWow_ReputationAutoEnabled,
+    MclarionWow_SetAutoReputationCapture = nil, nil, nil
+repCheckbox:SetChecked(true)
+expectTrue(pcall(repCheckbox.scripts.OnClick, repCheckbox), "missing reputation module toggle contained")
+expectEqual(repCheckbox:GetChecked(), false, "missing reputation module cannot opt in")
+expectTrue(pcall(actions["Reputation now"].scripts.OnClick, actions["Reputation now"]),
+    "missing reputation module manual action contained")
+expectTrue(visibleStatus("Reputation: Companion addon unavailable"), "missing module status visible")
+expectEqual(MclarionWowReputationData, repRoot, "missing module preserves reputation data")
+MclarionWow_CaptureReputation, MclarionWow_ReputationAutoEnabled,
+    MclarionWow_SetAutoReputationCapture = repCapture, repEnabled, repToggle
+expectTrue(actions["Quests now"] ~= nil, "settings expose a manual Quests now action")
+actionFrame.scripts.OnEvent(actionFrame, "QUEST_LOG_UPDATE")
+expectEqual(MclarionWowQuestData, nil, "quest event alone cannot opt in automatically")
+actions["Quests now"].scripts.OnClick(actions["Quests now"])
+expectTrue(MclarionWowQuestData and #MclarionWowQuestData.characters[actionGuid] == 1,
+    "Quests now persists one active-log observation without auto opt-in")
+expectTrue(visibleStatus("Quests: Scanned"), "manual quest status is visible")
+expectEqual(MclarionWowData, legacyRoot, "manual quest capture leaves legacy root identity intact")
+local questCheckbox, questIndex = nil, 0
+for _, frame in ipairs(frames) do
+    if frame.parent == actionPanel and frame.frameType == "CheckButton" then
+        questIndex = questIndex + 1
+        if questIndex == 6 then questCheckbox = frame end
+    end
+end
+questCheckbox:SetChecked(true)
+questCheckbox.scripts.OnClick(questCheckbox)
+expectEqual(MclarionWow_QuestAutoEnabled(), true, "quest auto opt-in is independent of legacy flags")
+local questRoot = MclarionWowQuestData
+questId = 32
+now = now + 1
+actionFrame.scripts.OnEvent(actionFrame, "QUEST_LOG_UPDATE")
+expectEqual(#MclarionWowQuestData.characters[actionGuid], 2,
+    "opted-in quest event captures a changed active-log state")
+expectEqual(MclarionWowData, legacyRoot, "automatic quest capture does not migrate legacy data")
+questRoot = MclarionWowQuestData
+actionFrame.scripts.OnEvent(actionFrame, "QUEST_LOG_UPDATE")
+expectEqual(MclarionWowQuestData, questRoot, "repeat event deduplicates unchanged quest state")
+questCheckbox:SetChecked(false)
+questCheckbox.scripts.OnClick(questCheckbox)
+expectEqual(MclarionWow_QuestAutoEnabled(), false, "quest opt-out persists separately")
+questRoot = MclarionWowQuestData
+questId = 33
+now = now + 1
+actionFrame.scripts.OnEvent(actionFrame, "QUEST_LOG_UPDATE")
+expectEqual(MclarionWowQuestData, questRoot, "disabled quest event does not capture")
+legacyRoot.syntheticLargeValue = string.rep("x", 750000)
+actions["Quests now"].scripts.OnClick(actions["Quests now"])
+expectEqual(MclarionWowQuestData, questRoot,
+    "combined whole-root projection refuses oversized legacy-plus-quest proposal")
+expectTrue(visibleStatus("Quests: Capture refused"),
+    "budget refusal is visible and does not expose player values")
+legacyRoot.syntheticLargeValue = nil
+local savedQuestRoot = MclarionWowQuestData
+local savedRepRoot = MclarionWowReputationData
+-- Each writer must charge the other progression root in the same envelope.
+savedRepRoot.syntheticLargeValue = string.rep("r", 750000)
+actions["Quests now"].scripts.OnClick(actions["Quests now"])
+expectEqual(MclarionWowQuestData, savedQuestRoot, "large reputation root refuses quest replacement")
+savedRepRoot.syntheticLargeValue = nil
+savedQuestRoot.syntheticLargeValue = string.rep("q", 750000)
+actions["Reputation now"].scripts.OnClick(actions["Reputation now"])
+expectEqual(MclarionWowReputationData, savedRepRoot, "large quest root refuses reputation replacement")
+savedQuestRoot.syntheticLargeValue = nil
+-- Classify nil as protected to prove the guard runs before the nil shortcut.
+local budgetSecretCheck = issecretvalue
+MclarionWowData = nil
+issecretvalue = function(value)
+    if value == nil then return true end
+    return budgetSecretCheck(value)
+end
+expectEqual(MclarionWow_QuestStorageBudget(true), nil,
+    "budget guards legacy root before accepting the nil shortcut")
+issecretvalue = budgetSecretCheck
+MclarionWowData = legacyRoot
+_G.C_QuestLog = oldQuestApi
+_G.C_Reputation = oldReputationApi
+
+-- Four additional categories use the dependent addon and never migrate legacy.
+MclarionWowData = legacyRoot
+MclarionWowWealthData, MclarionWowHonorTitleData = nil, nil
+local copper, currencyQuantity, honorCount, selectedTitle = 12345, 8, 3, -1
+_G.GetMoney = function() return copper end
+_G.C_CurrencyInfo = {
+    GetCurrencyListSize = function() return 1 end,
+    GetCurrencyListInfo = function() return {name="Synthetic token", isHeader=false,
+        isHeaderExpanded=false, currencyListDepth=0, currencyID=42,
+        quantity=currencyQuantity, isAccountWide=false} end,
+}
+_G.GetPVPLifetimeStats = function() return honorCount, 2 end
+_G.GetPVPSessionStats = function() return 1, 0 end
+_G.GetPVPYesterdayStats = function() return 2, 0 end
+_G.C_MajorFactions = {GetMajorFactionProgressionInfo = function(id)
+    assert(id == 2800)
+    return {renownLevel=2,renownReputationEarned=100,
+        renownLevelThreshold=1000,maxLevel=10}
+end}
+_G.GetCurrentTitle = function() return selectedTitle end
+_G.GetNumTitles = function() return 2 end
+_G.IsTitleKnown = function(id) return id == 1 end
+_G.GetTitleName = function() return "Synthetic title", true end
+expectEqual(MclarionWow_GoldAutoEnabled(), false, "gold auto first-run off")
+expectEqual(MclarionWow_CurrencyAutoEnabled(), false, "currency auto first-run off")
+expectEqual(MclarionWow_HonorAutoEnabled(), false, "honor auto first-run off")
+expectEqual(MclarionWow_TitleAutoEnabled(), false, "title auto first-run off")
+actionFrame.scripts.OnEvent(actionFrame, "PLAYER_ENTERING_WORLD")
+expectEqual(MclarionWowWealthData, nil, "world entry cannot implicitly opt into wealth")
+expectEqual(MclarionWowHonorTitleData, nil, "world entry cannot implicitly opt into honor or titles")
+local addActions = {}
+for _, frame in ipairs(frames) do
+    if frame.parent == actionPanel and frame.frameType == "Button" then addActions[frame.text] = frame end
+end
+for _, label in ipairs({"Gold now", "Currencies now", "Honor now", "Titles now"}) do
+    expectTrue(addActions[label] ~= nil, label .. " is available in settings")
+    if addActions[label] then addActions[label].scripts.OnClick(addActions[label]) end
+end
+expectTrue(MclarionWowWealthData and MclarionWowWealthData.characters[actionGuid].gold[1].copper == copper,
+    "manual Gold now captures with auto off")
+expectTrue(MclarionWowWealthData.characters[actionGuid].currency[1].values[1].quantity == currencyQuantity,
+    "manual Currencies now records character-owned visible balance")
+expectTrue(MclarionWowHonorTitleData and MclarionWowHonorTitleData.characters[actionGuid].honor[1]:find("MHWOWH1|",1,true)==1,
+    "manual Honor now records supported counters")
+expectTrue(MclarionWowHonorTitleData.characters[actionGuid].title[1]:find("|none|0|",1,true)~=nil,
+    "manual Titles now records explicit no-title")
+expectTrue(visibleStatus("Gold: Scanned") and visibleStatus("Currencies: Scanned") and
+    visibleStatus("Honor: Scanned") and visibleStatus("Titles: Scanned"),
+    "four independent manual statuses identify saved scans")
+expectEqual(MclarionWowData, legacyRoot, "four manual writes preserve legacy root identity")
+local controls = {}
+for _, frame in ipairs(frames) do
+    if frame.parent == actionPanel and frame.frameType == "CheckButton" then
+        controls[#controls+1] = frame
+    end
+end
+expectEqual(#controls, 11, "four separate companion opt-in controls")
+local mainTab, moreTab
+for _, frame in ipairs(frames) do
+    if frame.parent == actionPanel and frame.text == "Main" then mainTab = frame end
+    if frame.parent == actionPanel and frame.text == "More captures" then moreTab = frame end
+end
+expectTrue(mainTab ~= nil and moreTab ~= nil, "settings expose distinct readable pages")
+if mainTab and moreTab then
+    moreTab.scripts.OnClick(moreTab)
+    expectTrue(controls[8].shown and not controls[1].shown,
+        "companion page hides the legacy controls")
+    mainTab.scripts.OnClick(mainTab)
+    expectTrue(not controls[8].shown and controls[1].shown,
+        "main page restores legacy controls without overlap")
+end
+for index=8,11 do
+    controls[index]:SetChecked(true)
+    controls[index].scripts.OnClick(controls[index])
+    expectEqual(controls[index]:GetChecked(), true, "companion opt-in " .. index .. " accepted")
+end
+expectTrue(MclarionWow_GoldAutoEnabled() and MclarionWow_CurrencyAutoEnabled() and
+    MclarionWow_HonorAutoEnabled() and MclarionWow_TitleAutoEnabled(),
+    "all four companion choices persist independently")
+local goldRoot, honorRoot = MclarionWowWealthData, MclarionWowHonorTitleData
+now = now+1; copper=copper+1; currencyQuantity=currencyQuantity+1
+honorCount=honorCount+1; selectedTitle=1
+-- Do not invent currency/honor/title-specific events without source evidence.
+actionFrame.scripts.OnEvent(actionFrame, "PLAYER_REGEN_ENABLED")
+expectTrue(MclarionWowWealthData ~= goldRoot and
+    #MclarionWowWealthData.characters[actionGuid].gold==2 and
+    #MclarionWowWealthData.characters[actionGuid].currency==2,
+    "post-combat retries both opted-in wealth categories")
+expectTrue(MclarionWowHonorTitleData ~= honorRoot and
+    #MclarionWowHonorTitleData.characters[actionGuid].honor==2 and
+    #MclarionWowHonorTitleData.characters[actionGuid].title==2,
+    "post-combat retries honor and selected title")
+local retainedWealth, retainedHonor = MclarionWowWealthData, MclarionWowHonorTitleData
+actionFrame.scripts.OnEvent(actionFrame, "PLAYER_REGEN_ENABLED")
+expectEqual(MclarionWowWealthData, retainedWealth, "unchanged wealth observation deduplicates")
+expectEqual(MclarionWowHonorTitleData, retainedHonor, "unchanged honor/title observation deduplicates")
+for index=8,11 do controls[index]:SetChecked(false);controls[index].scripts.OnClick(controls[index]) end
+retainedWealth, retainedHonor = MclarionWowWealthData, MclarionWowHonorTitleData
+now=now+1;copper=copper+1;honorCount=honorCount+1
+actionFrame.scripts.OnUpdate(actionFrame, 300)
+expectEqual(MclarionWowWealthData, retainedWealth, "opt-out suppresses timed wealth captures")
+expectEqual(MclarionWowHonorTitleData, retainedHonor, "opt-out suppresses timed honor/title captures")
+local unavailable = {MclarionWow_CaptureGold,MclarionWow_GoldAutoEnabled,MclarionWow_SetAutoGoldCapture}
+MclarionWow_CaptureGold,MclarionWow_GoldAutoEnabled,MclarionWow_SetAutoGoldCapture=nil,nil,nil
+controls[8]:SetChecked(true)
+expectTrue(pcall(controls[8].scripts.OnClick, controls[8]) and not controls[8]:GetChecked(),
+    "missing gold module refuses toggle safely")
+expectTrue(pcall(addActions["Gold now"].scripts.OnClick,addActions["Gold now"]) and
+    visibleStatus("Gold: Companion addon unavailable"),
+    "missing gold module explains manual refusal")
+expectEqual(MclarionWowWealthData, retainedWealth, "missing module preserves wealth root")
+MclarionWow_CaptureGold,MclarionWow_GoldAutoEnabled,MclarionWow_SetAutoGoldCapture=
+    unavailable[1],unavailable[2],unavailable[3]
+-- Every callback must count all five roots, replacing only its own root once.
+local budgets = {
+    {MclarionWow_QuestStorageBudget,"quest",MclarionWowQuestData},
+    {MclarionWow_ReputationStorageBudget,"reputation",MclarionWowReputationData},
+    {MclarionWow_WealthStorageBudget,"wealth",MclarionWowWealthData},
+    {MclarionWow_HonorTitleStorageBudget,"honor",MclarionWowHonorTitleData},
+}
+for _, case in ipairs(budgets) do
+    expectEqual(case[1](case[3]), true, case[2] .. " budget accepts unchanged full roots")
+end
+local siblingRoots = {MclarionWowData,MclarionWowQuestData,MclarionWowReputationData,
+    MclarionWowWealthData,MclarionWowHonorTitleData}
+for position=1,5 do
+    local root=siblingRoots[position]
+    root.syntheticLargeValue=string.rep("z",750000)
+    for _, case in ipairs(budgets) do
+        if case[3]~=root then
+            expectEqual(case[1](case[3]), nil,
+                case[2] .. " budget charges sibling " .. position)
+        end
+    end
+    root.syntheticLargeValue=nil
+end
+local beforeAll = {MclarionWowData,MclarionWowQuestData,MclarionWowReputationData,
+    MclarionWowWealthData,MclarionWowHonorTitleData}
+MclarionWowQuestData.syntheticLargeValue=string.rep("x",750000)
+addActions["Gold now"].scripts.OnClick(addActions["Gold now"])
+addActions["Honor now"].scripts.OnClick(addActions["Honor now"])
+for index, root in ipairs(beforeAll) do
+    expectEqual(({MclarionWowData,MclarionWowQuestData,MclarionWowReputationData,
+        MclarionWowWealthData,MclarionWowHonorTitleData})[index],root,
+        "combined budget refusal preserves root " .. index)
+end
+MclarionWowQuestData.syntheticLargeValue=nil
+-- Candidate replacement is charged once, never together with its old root.
+MclarionWowData.syntheticLargeValue=string.rep("a",200000)
+MclarionWowQuestData.syntheticLargeValue=string.rep("b",200000)
+MclarionWowReputationData.syntheticLargeValue=string.rep("c",200000)
+MclarionWowWealthData.syntheticLargeValue=string.rep("old",300000)
+local proposed={schema=1,syntheticLargeValue=string.rep("new",33333)}
+expectEqual(MclarionWow_WealthStorageBudget(proposed),true,
+    "wealth candidate replaces old root once inside five-root envelope")
+MclarionWowData.syntheticLargeValue=nil
+MclarionWowQuestData.syntheticLargeValue=nil
+MclarionWowReputationData.syntheticLargeValue=nil
+MclarionWowWealthData.syntheticLargeValue=nil
+local remembered = {MclarionWowData,MclarionWowQuestData,MclarionWowReputationData,
+    MclarionWowWealthData,MclarionWowHonorTitleData}
+chunk("MclarionWow", {})
+for _, path in ipairs({"QuestCapture.lua","ReputationCapture.lua",
+    "WealthCapture.lua","HonorTitleCapture.lua"}) do assert(loadfile("../"..path))() end
+for index, original in ipairs(remembered) do
+    expectEqual(({MclarionWowData,MclarionWowQuestData,MclarionWowReputationData,
+        MclarionWowWealthData,MclarionWowHonorTitleData})[index],original,
+        "synthetic addon reload reconstructs preserved root " .. index)
+end
+expectTrue(not MclarionWow_GoldAutoEnabled() and not MclarionWow_CurrencyAutoEnabled() and
+    not MclarionWow_HonorAutoEnabled() and not MclarionWow_TitleAutoEnabled(),
+    "synthetic reload retains four separate off preferences")
 
 if failures > 0 then
     io.stderr:write(string.format("\n%d/%d assertions failed\n", failures, tests))

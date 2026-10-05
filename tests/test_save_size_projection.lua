@@ -8,7 +8,14 @@ local function loadFixture(path)
     local text = assert(file:read("*a"))
     assert(file:close())
     local env = {}
-    assert(loadfile(path, "t", env))()
+    local chunk
+    if setfenv then
+        chunk = assert(loadfile(path))
+        setfenv(chunk, env)
+    else
+        chunk = assert(loadfile(path, "t", env))
+    end
+    chunk()
     return assert(env.MclarionWowData), #text
 end
 

@@ -4,7 +4,14 @@ local guid = "Player-1234-ABCDEF12" -- synthetic fixture owner
 
 local function loadSynthetic(path)
     local environment = {}
-    assert(loadfile(path, "t", environment))()
+    local chunk
+    if setfenv then
+        chunk = assert(loadfile(path))
+        setfenv(chunk, environment)
+    else
+        chunk = assert(loadfile(path, "t", environment))
+    end
+    chunk()
     return assert(environment.MclarionWowData)
 end
 

@@ -1096,6 +1096,33 @@ local function estimateSavedRoot(root)
     return bytes
 end
 
+-- Provisional structural envelope, not game-serialized bytes. Substitute the
+-- proposed root exactly once; charge every other root, including legacy.
+local function companionBudget(which, candidate)
+    if combatStatus() ~= false then return nil end
+    local roots = { MclarionWowData, MclarionWowQuestData,
+        MclarionWowReputationData, MclarionWowWealthData,
+        MclarionWowHonorTitleData }
+    roots[which] = candidate
+    local total = 0
+    for index = 1, 5 do
+        local root = roots[index]
+        -- Check nil too: a client protection shim can classify nil as secret.
+        if isSecret(root) then return nil end
+        if root ~= nil then
+            local bytes = estimateSavedRoot(root)
+            if not bytes then return nil end
+            total = total + bytes
+            if total > 3000000 then return nil end
+        end
+    end
+    return true
+end
+function MclarionWow_QuestStorageBudget(candidate) return companionBudget(2, candidate) end
+function MclarionWow_ReputationStorageBudget(candidate) return companionBudget(3, candidate) end
+function MclarionWow_WealthStorageBudget(candidate) return companionBudget(4, candidate) end
+function MclarionWow_HonorTitleStorageBudget(candidate) return companionBudget(5, candidate) end
+
 -- Build an isolated schema-3 skeleton from the current schema-2 root. This is
 -- a dry run only: progression stays empty, both future capture flags stay off,
 -- and the returned graph is never assigned to SavedVariables.
@@ -1633,13 +1660,21 @@ local function saveItemMetadata(guid, source, payload)
     return true
 end
 
-local settingsWindow, characterStatusLabel, combatStatusLabel, bagStatusLabel, bankStatusLabel, itemStatusLabel
+local settingsWindow, characterStatusLabel, combatStatusLabel, bagStatusLabel, bankStatusLabel, itemStatusLabel, questStatusLabel, reputationStatusLabel
+local goldStatusLabel, currencyStatusLabel, honorStatusLabel, titleStatusLabel
+local goldMessage = "No money observation this session."
+local currencyMessage = "No visible currency observation this session."
+local honorMessage = "No supported PvP observation this session."
+local titleMessage = "No selected-title observation this session."
 local captureNow
+local inWorld = false
 local characterMessage = "No character scan this session."
 local combatMessage = "Waiting for the next login."
 local bagMessage = "No bag capture this session."
 local bankMessage = "No own-bank capture this session."
 local itemMessage = "Off; enable item details to capture cached names."
+local questMessage = "No active quest-log observation this session."
+local reputationMessage = "No visible reputation observation this session."
 
 local function refreshSettingsStatus()
     if characterStatusLabel then characterStatusLabel:SetText("Character: " .. characterMessage) end
@@ -1647,6 +1682,22 @@ local function refreshSettingsStatus()
     if bagStatusLabel then bagStatusLabel:SetText("Bags: " .. bagMessage) end
     if bankStatusLabel then bankStatusLabel:SetText("Bank: " .. bankMessage) end
     if itemStatusLabel then itemStatusLabel:SetText("Items: " .. itemMessage) end
+    if questStatusLabel then
+        questStatusLabel:SetText("Quests: " .. (type(MclarionWow_CaptureQuests) == "function" and
+            questMessage or "Companion addon unavailable; install/enable MclarionWowProgression."))
+    end
+    if reputationStatusLabel then
+        reputationStatusLabel:SetText("Reputation: " .. (type(MclarionWow_CaptureReputation) == "function" and
+            reputationMessage or "Companion addon unavailable; install/enable MclarionWowProgression."))
+    end
+    if goldStatusLabel then goldStatusLabel:SetText("Gold: " .. (type(MclarionWow_CaptureGold) == "function" and
+        goldMessage or "Companion addon unavailable; install/enable MclarionWowProgression.")) end
+    if currencyStatusLabel then currencyStatusLabel:SetText("Currencies: " .. (type(MclarionWow_CaptureCurrency) == "function" and
+        currencyMessage or "Companion addon unavailable; install/enable MclarionWowProgression.")) end
+    if honorStatusLabel then honorStatusLabel:SetText("Honor: " .. (type(MclarionWow_CaptureHonor) == "function" and
+        honorMessage or "Companion addon unavailable; install/enable MclarionWowProgression.")) end
+    if titleStatusLabel then titleStatusLabel:SetText("Titles: " .. (type(MclarionWow_CaptureTitle) == "function" and
+        titleMessage or "Companion addon unavailable; install/enable MclarionWowProgression.")) end
 end
 
 local function reportLoggingAfterOptOut()
@@ -1685,7 +1736,7 @@ end
 
 local function createSettingsWindow()
     settingsWindow = CreateFrame("Frame", "MclarionWowSettingsFrame", UIParent, "BasicFrameTemplateWithInset")
-    settingsWindow:SetSize(490, 490)
+    settingsWindow:SetSize(490, 630)
     settingsWindow:SetPoint("CENTER")
     settingsWindow:SetFrameStrata("DIALOG")
     settingsWindow:SetMovable(true)
@@ -1693,21 +1744,37 @@ local function createSettingsWindow()
     settingsWindow:RegisterForDrag("LeftButton")
     settingsWindow:SetScript("OnDragStart", settingsWindow.StartMoving)
     settingsWindow:SetScript("OnDragStop", settingsWindow.StopMovingOrSizing)
+    -- Two pages keep all labels/actions inside the existing readable window.
+    local legacyWidgets, companionWidgets = {}, {}
+    local function legacyFrame(kind, name, parent, template)
+        local widget = CreateFrame(kind, name, parent, template)
+        legacyWidgets[#legacyWidgets + 1] = widget
+        return widget
+    end
+    local function legacyText(layer, style, font)
+        local widget = settingsWindow:CreateFontString(layer, style, font)
+        legacyWidgets[#legacyWidgets + 1] = widget
+        return widget
+    end
+    local function companion(widget)
+        companionWidgets[#companionWidgets + 1] = widget
+        return widget
+    end
 
-    local title = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    local title = legacyText(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 18, -10)
     title:SetText("Vaultkeeper companion")
-    local note = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local note = legacyText(nil, "OVERLAY", "GameFontNormal")
     note:SetPoint("TOPLEFT", 18, -37)
     note:SetText("Auto-capture works with this window closed; loot and bag changes scan.")
-    local bankNote = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local bankNote = legacyText(nil, "OVERLAY", "GameFontNormal")
     bankNote:SetPoint("TOPLEFT", 18, -55)
     bankNote:SetText("Open your character-bank tab for bank scans; /reload saves to disk.")
 
     local function checkbox(label, y, key)
-        local button = CreateFrame("CheckButton", nil, settingsWindow, "UICheckButtonTemplate")
+        local button = legacyFrame("CheckButton", nil, settingsWindow, "UICheckButtonTemplate")
         button:SetPoint("TOPLEFT", 18, y)
-        local text = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        local text = legacyText(nil, "OVERLAY", "GameFontNormal")
         text:SetPoint("LEFT", button, "RIGHT", 4, 0)
         text:SetText(label)
         local settings = settingsRoot()
@@ -1737,23 +1804,81 @@ local function createSettingsWindow()
     checkbox("Capture own bag changes, out of combat", -149, "autoBagCapture")
     checkbox("Capture own bank while open, out of combat", -180, "autoBankCapture")
     checkbox("Capture own item details (cached names only)", -211, "autoItemMetadataCapture")
+    local questCheckbox = legacyFrame("CheckButton", nil, settingsWindow, "UICheckButtonTemplate")
+    questCheckbox:SetPoint("TOPLEFT", 18, -242)
+    local questText = legacyText(nil, "OVERLAY", "GameFontNormal")
+    questText:SetPoint("LEFT", questCheckbox, "RIGHT", 4, 0)
+    questText:SetText("Auto-capture active quest-log observations (off by default)")
+    questCheckbox:SetChecked(type(MclarionWow_QuestAutoEnabled) == "function" and
+        MclarionWow_QuestAutoEnabled() or false)
+    questCheckbox:SetScript("OnClick", function(self)
+        local enabled = false
+        if type(MclarionWow_QuestAutoEnabled) == "function" then
+            local checked, value = pcall(MclarionWow_QuestAutoEnabled)
+            enabled = checked and value == true
+        end
+        local ok = false
+        if type(MclarionWow_SetAutoQuestCapture) == "function" then
+            local called, result = pcall(MclarionWow_SetAutoQuestCapture, self:GetChecked() == true)
+            ok = called and result == true
+        end
+        if not ok then
+            self:SetChecked(enabled)
+            questMessage = "Setting refused; previous preference preserved."
+        else
+            questMessage = self:GetChecked() and "Automatic capture enabled." or
+                "Automatic capture off; Quests now is still available."
+        end
+        refreshSettingsStatus()
+    end)
 
-    characterStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    characterStatusLabel:SetPoint("TOPLEFT", 18, -245)
-    combatStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    combatStatusLabel:SetPoint("TOPLEFT", 18, -267)
-    bagStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    bagStatusLabel:SetPoint("TOPLEFT", 18, -289)
-    bankStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    bankStatusLabel:SetPoint("TOPLEFT", 18, -311)
-    itemStatusLabel = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    itemStatusLabel:SetPoint("TOPLEFT", 18, -333)
+    local reputationCheckbox = legacyFrame("CheckButton", nil, settingsWindow, "UICheckButtonTemplate")
+    reputationCheckbox:SetPoint("TOPLEFT", 18, -268)
+    local reputationText = legacyText(nil, "OVERLAY", "GameFontNormal")
+    reputationText:SetPoint("LEFT", reputationCheckbox, "RIGHT", 4, 0)
+    reputationText:SetText("Auto-capture visible reputation (off by default)")
+    reputationCheckbox:SetChecked(type(MclarionWow_ReputationAutoEnabled) == "function" and
+        MclarionWow_ReputationAutoEnabled() or false)
+    reputationCheckbox:SetScript("OnClick", function(self)
+        local enabled = false
+        if type(MclarionWow_ReputationAutoEnabled) == "function" then
+            local checked, value = pcall(MclarionWow_ReputationAutoEnabled)
+            enabled = checked and value == true
+        end
+        local ok = false
+        if type(MclarionWow_SetAutoReputationCapture) == "function" then
+            local called, result = pcall(MclarionWow_SetAutoReputationCapture, self:GetChecked() == true)
+            ok = called and result == true
+        end
+        if not ok then
+            self:SetChecked(enabled)
+            reputationMessage = "Setting refused; previous preference preserved."
+        else
+            reputationMessage = self:GetChecked() and "Automatic capture enabled." or
+                "Automatic capture off; Reputation now is still available."
+        end
+        refreshSettingsStatus()
+    end)
+    characterStatusLabel = legacyText(nil, "OVERLAY", "GameFontHighlight")
+    characterStatusLabel:SetPoint("TOPLEFT", 18, -304)
+    combatStatusLabel = legacyText(nil, "OVERLAY", "GameFontHighlight")
+    combatStatusLabel:SetPoint("TOPLEFT", 18, -326)
+    bagStatusLabel = legacyText(nil, "OVERLAY", "GameFontHighlight")
+    bagStatusLabel:SetPoint("TOPLEFT", 18, -348)
+    bankStatusLabel = legacyText(nil, "OVERLAY", "GameFontHighlight")
+    bankStatusLabel:SetPoint("TOPLEFT", 18, -370)
+    itemStatusLabel = legacyText(nil, "OVERLAY", "GameFontHighlight")
+    itemStatusLabel:SetPoint("TOPLEFT", 18, -392)
+    questStatusLabel = legacyText(nil, "OVERLAY", "GameFontHighlight")
+    questStatusLabel:SetPoint("TOPLEFT", 18, -414)
+    reputationStatusLabel = legacyText(nil, "OVERLAY", "GameFontHighlight")
+    reputationStatusLabel:SetPoint("TOPLEFT", 18, -436)
     refreshSettingsStatus()
     for index, entry in ipairs({ { "Character now", "character" }, { "Bags now", "bags" },
         { "Bank now", "bank" }, { "Items now", "items" } }) do
-        local button = CreateFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
+        local button = legacyFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
         button:SetSize(110, 25)
-        button:SetPoint("TOPLEFT", 18 + (index - 1) * 117, -365)
+        button:SetPoint("TOPLEFT", 18 + (index - 1) * 117, -464)
         button:SetText(entry[1])
         button:SetScript("OnClick", function()
             if not captureNow then return end
@@ -1768,9 +1893,51 @@ local function createSettingsWindow()
             end
         end)
     end
-    local stopButton = CreateFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
+    local questsNow = legacyFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
+    questsNow:SetSize(110, 25)
+    questsNow:SetPoint("TOPLEFT", 18, -496)
+    questsNow:SetText("Quests now")
+    questsNow:SetScript("OnClick", function()
+        if not inWorld then
+            questMessage = "Unavailable before world entry."
+        elseif type(MclarionWow_CaptureQuests) ~= "function" then
+            questMessage = "Companion addon unavailable; install/enable MclarionWowProgression."
+        else
+            local ok, stored, result = pcall(MclarionWow_CaptureQuests, true)
+            if not ok or stored ~= true then
+                questMessage = "Capture refused; prior observations preserved."
+            elseif result == "saved" then
+                questMessage = "Scanned; held in memory until WoW saves."
+            elseif result == "unchanged" then
+                questMessage = "Scanned; unchanged."
+            else questMessage = "Changed state waits for a later server second." end
+        end
+        refreshSettingsStatus()
+    end)
+    local reputationNow = legacyFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
+    reputationNow:SetSize(125, 25)
+    reputationNow:SetPoint("TOPLEFT", 140, -496)
+    reputationNow:SetText("Reputation now")
+    reputationNow:SetScript("OnClick", function()
+        if not inWorld then
+            reputationMessage = "Unavailable before world entry."
+        elseif type(MclarionWow_CaptureReputation) ~= "function" then
+            reputationMessage = "Companion addon unavailable; install/enable MclarionWowProgression."
+        else
+            local ok, stored, result = pcall(MclarionWow_CaptureReputation, true)
+            if not ok or stored ~= true then
+                reputationMessage = "Capture refused; prior observations preserved."
+            elseif result == "saved" then
+                reputationMessage = "Scanned; held in memory until WoW saves."
+            elseif result == "unchanged" then
+                reputationMessage = "Scanned; unchanged."
+            else reputationMessage = "Changed state waits for a later server second." end
+        end
+        refreshSettingsStatus()
+    end)
+    local stopButton = legacyFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
     stopButton:SetSize(175, 25)
-    stopButton:SetPoint("TOPLEFT", 18, -400)
+    stopButton:SetPoint("TOPLEFT", 18, -530)
     stopButton:SetText("Stop logging now")
     stopButton:SetScript("OnClick", function()
         local current = settingsRoot()
@@ -1783,12 +1950,127 @@ local function createSettingsWindow()
         combatCheckbox:SetChecked(false)
         stopLoggingNow()
     end)
-    local footer = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    footer:SetPoint("TOPLEFT", 18, -437)
+    local footer = legacyText(nil, "OVERLAY", "GameFontNormal")
+    footer:SetPoint("TOPLEFT", 18, -567)
     footer:SetText("Stop logging now may end logging started outside this addon.")
-    local saveNote = settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    saveNote:SetPoint("TOPLEFT", 18, -459)
+    local saveNote = legacyText(nil, "OVERLAY", "GameFontNormal")
+    saveNote:SetPoint("TOPLEFT", 18, -589)
     saveNote:SetText("Items now: bags + gear; Bank now: bank items if enabled.")
+
+    local categories = {
+        {label="Gold", plural="Gold", capture="MclarionWow_CaptureGold",
+            enabled="MclarionWow_GoldAutoEnabled", setting="MclarionWow_SetAutoGoldCapture",
+            description="Auto-capture own money balance (off by default)"},
+        {label="Currencies", plural="Currency", capture="MclarionWow_CaptureCurrency",
+            enabled="MclarionWow_CurrencyAutoEnabled", setting="MclarionWow_SetAutoCurrencyCapture",
+            description="Auto-capture visible currencies (off by default)"},
+        {label="Honor", plural="Honor", capture="MclarionWow_CaptureHonor",
+            enabled="MclarionWow_HonorAutoEnabled", setting="MclarionWow_SetAutoHonorCapture",
+            description="Auto-capture supported PvP counters (off by default)"},
+        {label="Titles", plural="Title", capture="MclarionWow_CaptureTitle",
+            enabled="MclarionWow_TitleAutoEnabled", setting="MclarionWow_SetAutoTitleCapture",
+            description="Auto-capture selected/known titles (off by default)"},
+    }
+    local function setMessage(index, text)
+        if index == 1 then goldMessage = text
+        elseif index == 2 then currencyMessage = text
+        elseif index == 3 then honorMessage = text
+        else titleMessage = text end
+        refreshSettingsStatus()
+    end
+    local function autoState(entry)
+        local fn = _G[entry.enabled]
+        if type(fn) ~= "function" or isSecret(fn) then return false end
+        local ok, value = pcall(fn)
+        return ok and value == true
+    end
+    local heading = companion(settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge"))
+    heading:SetPoint("TOPLEFT", 18, -48)
+    heading:SetText("Wealth, PvP and titles — local observations")
+    local scope = companion(settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal"))
+    scope:SetPoint("TOPLEFT", 18, -77)
+    scope:SetText("Visible currency list is partial; no event or acquisition history implied.")
+    local companionChecks = {}
+    for index, entry in ipairs(categories) do
+        local checkbox = companion(CreateFrame("CheckButton", nil, settingsWindow, "UICheckButtonTemplate"))
+        companionChecks[index] = checkbox
+        checkbox:SetPoint("TOPLEFT", 18, -112 - (index - 1) * 42)
+        local text = companion(settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal"))
+        text:SetPoint("LEFT", checkbox, "RIGHT", 4, 0)
+        text:SetText(entry.description)
+        checkbox:SetChecked(autoState(entry))
+        checkbox:SetScript("OnClick", function(self)
+            local previous = autoState(entry)
+            local fn = _G[entry.setting]
+            local ok, accepted = false, nil
+            if type(fn) == "function" and not isSecret(fn) then
+                ok, accepted = pcall(fn, self:GetChecked() == true)
+            end
+            if not ok or accepted ~= true then
+                self:SetChecked(previous)
+                setMessage(index, "Setting refused; previous preference preserved.")
+            else
+                setMessage(index, self:GetChecked() and
+                    "Automatic capture enabled; held until WoW saves." or
+                    "Automatic capture off; manual capture remains available.")
+            end
+        end)
+    end
+    local statusLabels = {}
+    for index = 1, 4 do
+        local label = companion(settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight"))
+        label:SetPoint("TOPLEFT", 18, -314 - (index - 1) * 27)
+        statusLabels[index] = label
+    end
+    goldStatusLabel, currencyStatusLabel, honorStatusLabel, titleStatusLabel =
+        statusLabels[1], statusLabels[2], statusLabels[3], statusLabels[4]
+    for index, entry in ipairs(categories) do
+        local button = companion(CreateFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate"))
+        button:SetSize(142, 27)
+        button:SetPoint("TOPLEFT", 18 + ((index - 1) % 2) * 158,
+            -444 - math.floor((index - 1) / 2) * 38)
+        button:SetText(entry.label .. " now")
+        button:SetScript("OnClick", function()
+            local fn = _G[entry.capture]
+            if not inWorld then setMessage(index, "Unavailable before world entry.")
+            elseif type(fn) ~= "function" or isSecret(fn) then
+                setMessage(index, "Companion addon unavailable; install/enable MclarionWowProgression.")
+            else
+                local ok, stored, result = pcall(fn, true)
+                if not ok or stored ~= true then
+                    setMessage(index, "Capture refused; previous observations preserved.")
+                elseif result == "saved" then
+                    setMessage(index, "Scanned; held in memory until WoW saves.")
+                elseif result == "unchanged" then
+                    setMessage(index, "Scanned; unchanged.")
+                else
+                    setMessage(index, "Changed state waits for a later server second.")
+                end
+            end
+        end)
+    end
+    local reminder = companion(settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal"))
+    reminder:SetPoint("TOPLEFT", 18, -548)
+    reminder:SetText("Manual scans need no auto opt-in; /reload or exit flushes saves.")
+    local legacyTab = CreateFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
+    legacyTab:SetSize(98, 24)
+    legacyTab:SetPoint("TOPRIGHT", -125, -8)
+    legacyTab:SetText("Main")
+    local companionTab = CreateFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
+    companionTab:SetSize(108, 24)
+    companionTab:SetPoint("TOPRIGHT", -12, -8)
+    companionTab:SetText("More captures")
+    local function showPage(more)
+        for _, widget in ipairs(legacyWidgets) do if more then widget:Hide() else widget:Show() end end
+        for _, widget in ipairs(companionWidgets) do if more then widget:Show() else widget:Hide() end end
+        if more then
+            for index, entry in ipairs(categories) do companionChecks[index]:SetChecked(autoState(entry)) end
+        end
+        refreshSettingsStatus()
+    end
+    legacyTab:SetScript("OnClick", function() showPage(false) end)
+    companionTab:SetScript("OnClick", function() showPage(true) end)
+    showPage(false)
     settingsWindow:Hide()
 end
 
@@ -1866,8 +2148,64 @@ SlashCmdList.MCLARIONWOWMIGRATIONPREFLIGHT = function()
 end
 
 local captureFrame = CreateFrame("Frame")
-local inWorld = false
 local elapsed = 0
+local function captureQuestsAutomatically()
+    if not inWorld or type(MclarionWow_QuestAutoEnabled) ~= "function" or
+        not MclarionWow_QuestAutoEnabled() then return end
+    local ok, captured, result = pcall(MclarionWow_CaptureQuests, false)
+    if not ok or captured ~= true then
+        questMessage = "Automatic scan refused; prior observations preserved."
+    elseif result == "saved" then questMessage = "Scanned; held in memory until WoW saves."
+    elseif result == "unchanged" then questMessage = "Scanned; unchanged."
+    else questMessage = "Changed state waits for a later server second." end
+    refreshSettingsStatus()
+end
+local function captureReputationAutomatically()
+    if not inWorld or type(MclarionWow_ReputationAutoEnabled) ~= "function" or
+        not MclarionWow_ReputationAutoEnabled() or
+        type(MclarionWow_CaptureReputation) ~= "function" then return end
+    local ok, captured, result = pcall(MclarionWow_CaptureReputation, false)
+    if not ok or captured ~= true then
+        reputationMessage = "Automatic scan refused; prior observations preserved."
+    elseif result == "saved" then reputationMessage = "Scanned; held in memory until WoW saves."
+    elseif result == "unchanged" then reputationMessage = "Scanned; unchanged."
+    else reputationMessage = "Changed state waits for a later server second." end
+    refreshSettingsStatus()
+end
+local function captureCompanionsAutomatically()
+    if not inWorld then return end
+    local categories = {
+        {MclarionWow_GoldAutoEnabled, MclarionWow_CaptureGold},
+        {MclarionWow_CurrencyAutoEnabled, MclarionWow_CaptureCurrency},
+        {MclarionWow_HonorAutoEnabled, MclarionWow_CaptureHonor},
+        {MclarionWow_TitleAutoEnabled, MclarionWow_CaptureTitle},
+    }
+    for index, category in ipairs(categories) do
+        local enabled, capture = category[1], category[2]
+        if not isSecret(enabled) and type(enabled) == "function" and
+            not isSecret(capture) and type(capture) == "function" then
+            local checked, active = pcall(enabled)
+            if checked and active == true then
+                local ok, stored, status = pcall(capture, false)
+                local message
+                if not ok or stored ~= true then
+                    message = "Automatic scan refused; previous observations preserved."
+                elseif status == "saved" then
+                    message = "Scanned; held in memory until WoW saves."
+                elseif status == "unchanged" then
+                    message = "Scanned; unchanged."
+                else
+                    message = "Changed state waits for a later server second."
+                end
+                if index == 1 then goldMessage = message
+                elseif index == 2 then currencyMessage = message
+                elseif index == 3 then honorMessage = message
+                else titleMessage = message end
+            end
+        end
+    end
+    refreshSettingsStatus()
+end
 local function enableCombatLogging()
     local settings, err = settingsRoot()
     if not settings then
@@ -2067,7 +2405,8 @@ end
 for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "PLAYER_EQUIPMENT_CHANGED",
     "PLAYER_LEVEL_UP", "ZONE_CHANGED", "ZONE_CHANGED_INDOORS",
     "ZONE_CHANGED_NEW_AREA", "PLAYER_REGEN_ENABLED", "BAG_UPDATE_DELAYED", "BAG_OPEN",
-    "BANKFRAME_OPENED", "PLAYERBANKSLOTS_CHANGED", "BANK_TABS_CHANGED" }) do
+    "BANKFRAME_OPENED", "PLAYERBANKSLOTS_CHANGED", "BANK_TABS_CHANGED",
+    "QUEST_LOG_UPDATE", "UPDATE_FACTION" }) do
     captureFrame:RegisterEvent(event)
 end
 local function onEvent(_, event, bagID)
@@ -2075,7 +2414,15 @@ local function onEvent(_, event, bagID)
         inWorld = true
         enableCombatLogging()
     end
-    if event ~= "BAG_UPDATE_DELAYED" and event ~= "BAG_OPEN" and
+    if event == "PLAYER_ENTERING_WORLD" or event == "QUEST_LOG_UPDATE" or
+        event == "PLAYER_REGEN_ENABLED" then pcall(captureQuestsAutomatically) end
+    if event == "PLAYER_ENTERING_WORLD" or event == "UPDATE_FACTION" or
+        event == "PLAYER_REGEN_ENABLED" then pcall(captureReputationAutomatically) end
+    if event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_REGEN_ENABLED" then
+        pcall(captureCompanionsAutomatically)
+    end
+    if event ~= "QUEST_LOG_UPDATE" and event ~= "UPDATE_FACTION" and
+        event ~= "BAG_UPDATE_DELAYED" and event ~= "BAG_OPEN" and
         event ~= "BANKFRAME_OPENED" and event ~= "PLAYERBANKSLOTS_CHANGED" and
         event ~= "BANK_TABS_CHANGED" then pcall(captureLocally) end
     if event == "PLAYER_ENTERING_WORLD" or event == "BAG_UPDATE_DELAYED" or
@@ -2114,6 +2461,9 @@ local function onUpdate(_, delta)
         pcall(captureLocally)
         pcall(captureBagsLocally)
         pcall(captureItemDetailsLocally, "bags")
+        pcall(captureQuestsAutomatically)
+        pcall(captureReputationAutomatically)
+        pcall(captureCompanionsAutomatically)
     end
 end
 captureFrame:SetScript("OnUpdate", function(...) pcall(onUpdate, ...) end)
