@@ -954,6 +954,156 @@ if type(MclarionWow_ProbeSavedSize) == "function" then
     MclarionWowData = oldData
 end
 
+expectTrue(type(MclarionWow_ProbeSchema3Preflight) == "function" and
+    type(SlashCmdList.MCLARIONWOWMIGRATIONPREFLIGHT) == "function",
+    "provides a manual, non-persisting schema-3 migration preflight")
+if type(MclarionWow_ProbeSchema3Preflight) == "function" then
+    local oldData = MclarionWowData
+    local function copyMigrationTable(value)
+        if type(value) ~= "table" then return value end
+        local result = {}
+        for key, child in pairs(value) do result[key] = copyMigrationTable(child) end
+        return result
+    end
+    local function loadMigrationFixture(path)
+        local environment = {}
+        local fixtureChunk
+        if type(setfenv) == "function" then
+            fixtureChunk = assert(loadfile(path))
+            setfenv(fixtureChunk, environment)
+        else
+            fixtureChunk = assert(loadfile(path, "t", environment))
+        end
+        fixtureChunk()
+        return assert(environment.MclarionWowData)
+    end
+    for _, fixture in ipairs({ "schema2-synthetic.lua", "schema2-synthetic-explicit.lua" }) do
+        local source = loadMigrationFixture(fixture)
+        local original = copyMigrationTable(source)
+        MclarionWowData = source
+        local expectedCandidate = copyMigrationTable(source)
+        expectedCandidate.schema = 3
+        expectedCandidate.settings.autoQuestCapture = false
+        expectedCandidate.settings.autoReputationCapture = false
+        expectedCandidate.progression = {}
+        local projected = assert(dofile("save_size_projection.lua").estimate(expectedCandidate))
+        local report, problem = MclarionWow_ProbeSchema3Preflight()
+        expectTrue(problem == nil and report and report:find(tostring(projected), 1, true) and
+            report:find("not actual file bytes", 1, true) and
+            report:find("No data saved.", 1, true) and
+            report:find("Player-", 1, true) == nil and sameData(source, original) and
+            #source.items["Player-1234-ABCDEF12"].bank == 2,
+            "migration preflight projects the preserved two-page fixture and remains read-only")
+    end
+    MclarionWowData = { schema = 2, characters = {}, items = {},
+        settings = { autoCombatLog = false }, progression = {} }
+    local report, problem = MclarionWow_ProbeSchema3Preflight()
+    expectTrue(report == nil and problem and problem:find("already", 1, true) and
+        MclarionWowData.schema == 2,
+        "existing progression root refuses without changing schema 2")
+    local protectedProgression = {}
+    MclarionWowData = { schema = 2, characters = {}, items = {},
+        settings = {}, progression = protectedProgression }
+    secretValues[protectedProgression] = true
+    local safeCall
+    safeCall, report, problem = pcall(MclarionWow_ProbeSchema3Preflight)
+    expectTrue(safeCall and report == nil and problem and
+        problem:find("protected", 1, true) ~= nil and
+        MclarionWowData.progression == protectedProgression,
+        "protected progression member refuses before comparison")
+    secretValues[protectedProgression] = nil
+    MclarionWowData = { schema = 2, characters = {}, items = {},
+        settings = { autoCombatLog = false, autoQuestCapture = true } }
+    report, problem = MclarionWow_ProbeSchema3Preflight()
+    expectTrue(report == nil and problem and problem:find("settings", 1, true) and
+        MclarionWowData.settings.autoQuestCapture == true,
+        "existing migration settings refuse without being normalized")
+    local protectedSetting = {}
+    MclarionWowData = { schema = 2, characters = {}, items = {},
+        settings = { autoQuestCapture = protectedSetting } }
+    secretValues[protectedSetting] = true
+    safeCall, report, problem = pcall(MclarionWow_ProbeSchema3Preflight)
+    expectTrue(safeCall and report == nil and problem and
+        problem:find("protected", 1, true) ~= nil and
+        MclarionWowData.settings.autoQuestCapture == protectedSetting,
+        "protected migration setting refuses before comparison")
+    secretValues[protectedSetting] = nil
+    MclarionWowData = { schema = 2, characters = {}, items = {},
+        settings = {}, stray = "synthetic extra root" }
+    report, problem = MclarionWow_ProbeSchema3Preflight()
+    expectTrue(report == nil and problem and problem:find("root key", 1, true) ~= nil and
+        MclarionWowData.stray ~= nil,
+        "unknown schema-2 root key cannot yield a successful dry run")
+    MclarionWowData = { schema = 2, characters = {}, items = {},
+        settings = { undocumentedSetting = true } }
+    report, problem = MclarionWow_ProbeSchema3Preflight()
+    expectTrue(report == nil and problem and problem:find("setting", 1, true) ~= nil and
+        MclarionWowData.settings.undocumentedSetting == true,
+        "unknown setting cannot yield a successful dry run")
+    MclarionWowData = { schema = 2, characters = {}, items = {},
+        settings = { autoCombatLog = "synthetic nonboolean" } }
+    report, problem = MclarionWow_ProbeSchema3Preflight()
+    expectTrue(report == nil and problem and problem:find("setting", 1, true) ~= nil and
+        MclarionWowData.settings.autoCombatLog == "synthetic nonboolean",
+        "nonboolean existing setting refuses without normalization")
+    MclarionWowData = { schema = 2, characters = {}, items = {} }
+    local noSettingsBefore = copyMigrationTable(MclarionWowData)
+    report, problem = MclarionWow_ProbeSchema3Preflight()
+    expectTrue(problem == nil and report and
+        report:find("Schema-3 dry-run projected", 1, true) and
+        sameData(MclarionWowData, noSettingsBefore) and MclarionWowData.settings == nil,
+        "missing optional settings are added only to the isolated dry-run candidate")
+    local malformed = { schema = 2, characters = {}, settings = { autoCombatLog = false } }
+    MclarionWowData = malformed
+    report, problem = MclarionWow_ProbeSchema3Preflight()
+    expectTrue(report == nil and problem and problem:find("item", 1, true) and
+        sameData(MclarionWowData, malformed),
+        "schema-2 roots missing the item map refuse without mutation")
+    local protected = { schema = 2, characters = {}, items = {}, settings = {} }
+    MclarionWowData = protected
+    secretTables[protected.items] = true
+    safeCall, report, problem = pcall(MclarionWow_ProbeSchema3Preflight)
+    expectTrue(safeCall and report == nil and problem and
+        problem:find("protected", 1, true) ~= nil,
+        "protected preserved roots refuse before cloning")
+    secretTables[protected.items] = nil
+    local touched = false
+    MclarionWowData = setmetatable({}, { __index = function(root)
+        touched = true
+        return 2
+    end })
+    safeCall, report, problem = pcall(MclarionWow_ProbeSchema3Preflight)
+    expectTrue(safeCall and report == nil and problem and
+        problem:find("metatable", 1, true) ~= nil and not touched,
+        "hostile migration root refuses before any field access")
+    local oldSecretValue, oldSecretTable = issecretvalue, issecrettable
+    issecrettable = nil
+    safeCall, report, problem = pcall(MclarionWow_ProbeSchema3Preflight)
+    expectTrue(safeCall and report == nil and problem and
+        problem:find("Protection checks", 1, true) ~= nil,
+        "missing migration protection primitive fails closed")
+    issecretvalue, issecrettable = oldSecretValue, oldSecretTable
+    MclarionWowData = { schema = 2, characters = {}, items = {}, settings = {} }
+    local beforeCombat = copyMigrationTable(MclarionWowData)
+    inCombat = true
+    report, problem = MclarionWow_ProbeSchema3Preflight()
+    expectTrue(report == nil and problem and problem:find("combat", 1, true) and
+        sameData(MclarionWowData, beforeCombat),
+        "migration preflight refuses combat before cloning saved data")
+    inCombat = false
+    MclarionWowData = { schema = 2, characters = {}, items = {}, settings = {} }
+    local slashBefore = copyMigrationTable(MclarionWowData)
+    local oldPrint, printed = print
+    print = function(message) printed = message end
+    SlashCmdList.MCLARIONWOWMIGRATIONPREFLIGHT()
+    print = oldPrint
+    expectTrue(type(printed) == "string" and
+        printed:find("Schema-3 dry-run projected", 1, true) and
+        printed:find("Player-", 1, true) == nil and sameData(MclarionWowData, slashBefore),
+        "migration slash command emits aggregate-only output and writes nothing")
+    MclarionWowData = oldData
+end
+
 expectTrue(type(MclarionWow_ProbeBank) == "function", "provides a manual count-only character bank probe")
 if type(MclarionWow_ProbeBank) == "function" then
     local oldSlots, oldInfo = C_Container.GetContainerNumSlots, C_Container.GetContainerItemInfo

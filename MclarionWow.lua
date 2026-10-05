@@ -1096,6 +1096,141 @@ local function estimateSavedRoot(root)
     return bytes
 end
 
+-- Build an isolated schema-3 skeleton from the current schema-2 root. This is
+-- a dry run only: progression stays empty, both future capture flags stay off,
+-- and the returned graph is never assigned to SavedVariables.
+local function cloneSavedGraph(value, depth, seen, state)
+    if isSecret(value) then return nil, "protected value" end
+    state.nodes = state.nodes + 1
+    if state.nodes > 50000 then return nil, "too many values" end
+    local kind = type(value)
+    if kind == "string" or kind == "boolean" then return value end
+    if kind == "number" then
+        if value ~= value or value == math.huge or value == -math.huge or
+            value ~= math.floor(value) or math.abs(value) > 9007199254740991 then
+            return nil, "unsupported number"
+        end
+        return value
+    end
+    if kind ~= "table" then return nil, "unsupported value" end
+    if issecrettable(value) then return nil, "protected table" end
+    if depth >= 8 then return nil, "too deep" end
+    local meta = getmetatable(value)
+    if isSecret(meta) or meta ~= nil then return nil, "metatable" end
+    if seen[value] then return nil, "repeated table" end
+    seen[value] = true
+    local result = {}
+    for key, child in pairs(value) do
+        if isSecret(key) then return nil, "protected key" end
+        local keyKind = type(key)
+        if keyKind ~= "string" and (keyKind ~= "number" or key <= 0 or
+            key > 2147483647 or key ~= math.floor(key)) then
+            return nil, "unsupported key"
+        end
+        local copied, reason = cloneSavedGraph(child, depth + 1, seen, state)
+        if copied == nil then return nil, reason end
+        result[key] = copied
+    end
+    return result
+end
+
+local function migrationTable(value, label, optional)
+    if isSecret(value) or (type(value) == "table" and issecrettable(value)) then
+        return nil, "Saved " .. label .. " is protected by the client."
+    end
+    if value == nil and optional then return true end
+    if type(value) ~= "table" then
+        return nil, "Saved " .. label .. " has an unsupported format."
+    end
+    local meta = getmetatable(value)
+    if isSecret(meta) or meta ~= nil then
+        return nil, "Saved " .. label .. " has a metatable."
+    end
+    return true
+end
+
+local function buildSchema3DryRun()
+    local combat, combatError = combatStatus()
+    if combat == nil then return nil, nil, combatError end
+    if combat then return nil, nil, "Migration preflight is unavailable during combat." end
+    local source = MclarionWowData
+    local ok, reason = migrationTable(source, "root")
+    if not ok then return nil, nil, reason end
+    local schema = rawget(source, "schema")
+    if isSecret(schema) then return nil, nil, "Saved schema is protected by the client." end
+    if schema ~= 2 then return nil, nil, "Migration preflight requires schema 2." end
+    local progression = rawget(source, "progression")
+    if isSecret(progression) then
+        return nil, nil, "Saved progression is protected by the client."
+    end
+    if progression ~= nil then
+        return nil, nil, "Saved data already has a progression root."
+    end
+    local allowedRoot = { schema = true, settings = true, characters = true,
+        bags = true, bank = true, items = true }
+    for key in pairs(source) do
+        if isSecret(key) then return nil, nil, "Saved root key is protected by the client." end
+        if not allowedRoot[key] then return nil, nil, "Saved root key is unsupported." end
+    end
+    local characters = rawget(source, "characters")
+    ok, reason = migrationTable(characters, "character data")
+    if not ok then return nil, nil, reason end
+    local items = rawget(source, "items")
+    ok, reason = migrationTable(items, "item details")
+    if not ok then return nil, nil, reason end
+    for _, field in ipairs({ "bags", "bank" }) do
+        ok, reason = migrationTable(rawget(source, field), field .. " data", true)
+        if not ok then return nil, nil, reason end
+    end
+    local settings = rawget(source, "settings")
+    ok, reason = migrationTable(settings, "settings", true)
+    if not ok then return nil, nil, reason end
+    if settings ~= nil then
+        local questFlag = rawget(settings, "autoQuestCapture")
+        local reputationFlag = rawget(settings, "autoReputationCapture")
+        if isSecret(questFlag) or isSecret(reputationFlag) then
+            return nil, nil, "Saved migration settings are protected by the client."
+        end
+        if questFlag ~= nil or reputationFlag ~= nil then
+            return nil, nil, "Saved migration settings already exist."
+        end
+        local allowedSetting = { autoCombatLog = true, autoCharacterCapture = true,
+            autoBagCapture = true, autoBankCapture = true,
+            autoItemMetadataCapture = true }
+        for key, value in pairs(settings) do
+            if isSecret(key) or isSecret(value) then
+                return nil, nil, "Saved settings are protected by the client."
+            end
+            if not allowedSetting[key] or type(value) ~= "boolean" then
+                return nil, nil, "Saved setting has an unsupported format."
+            end
+        end
+    end
+    local sourceSize, sizeReason = estimateSavedRoot(source)
+    if not sourceSize then
+        return nil, nil, "Schema-2 source refused (" .. sizeReason .. ")."
+    end
+    local candidate, cloneReason = cloneSavedGraph(source, 0, {}, { nodes = 0 })
+    if not candidate then return nil, nil, "Schema-2 clone refused (" .. cloneReason .. ")." end
+    candidate.schema = 3
+    if candidate.settings == nil then candidate.settings = {} end
+    candidate.settings.autoQuestCapture = false
+    candidate.settings.autoReputationCapture = false
+    candidate.progression = {}
+    local projected, projectedReason = estimateSavedRoot(candidate)
+    if not projected then
+        return nil, nil, "Schema-3 candidate refused (" .. projectedReason .. ")."
+    end
+    return candidate, projected
+end
+
+function MclarionWow_ProbeSchema3Preflight()
+    local _, projected, reason = buildSchema3DryRun()
+    if not projected then return nil, reason end
+    return string.format("Schema-3 dry-run projected %d/3000000 bytes " ..
+        "(not actual file bytes). No data saved.", projected)
+end
+
 function MclarionWow_ProbeSavedSize()
     local combat, err = combatStatus()
     if combat == nil then return nil, err end
@@ -1678,6 +1813,12 @@ SLASH_MCLARIONWOWSIZEPROBE1 = "/mhwowsizeprobe"
 SlashCmdList.MCLARIONWOWSIZEPROBE = function()
     local ok, report, err = pcall(MclarionWow_ProbeSavedSize)
     print("MclarionWow: " .. (ok and (report or err) or "Size probe unavailable."))
+end
+
+SLASH_MCLARIONWOWMIGRATIONPREFLIGHT1 = "/mhwowmigrationpreflight"
+SlashCmdList.MCLARIONWOWMIGRATIONPREFLIGHT = function()
+    local ok, report, err = pcall(MclarionWow_ProbeSchema3Preflight)
+    print("MclarionWow: " .. (ok and (report or err) or "Migration preflight unavailable."))
 end
 
 local captureFrame = CreateFrame("Frame")

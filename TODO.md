@@ -2,6 +2,7 @@
 
 ## Addon-only next scope: Forever API evidence and writer safety
 
+- [ ] Release and verify the 0.11.10 **read-only** `/mhwowmigrationpreflight` candidate while WoW is closed, then obtain one out-of-combat aggregate result. It constructs and discards an empty-progression schema-3 skeleton; it is not an actual migration, progression writer, semantic validation of every legacy wire, or upload guarantee.
 - [x] 0.11.9 **read-only** `/mhwowsizeprobe` published, hash-verified, installed with a recoverable 0.11.8 backup, and observed in-client on 5 October 2026: **300632/3000000 projected bytes (not actual file bytes); no data saved**. This matches the earlier stopped-game projection, not a current disk measurement or upload guarantee. Do not request an unchanged repeat.
 - [x] Add a **test-only** clone-and-preflight reference around two populated schema-2 fixture roots. Both bank-array spellings preserve character/bag/bank/item values and the second bank page; rejected oversized/malformed proposals, aliased/cyclic observations and hostile root/settings metatables do not mutate the inputs. This does **not** test a runtime migration or validate all legacy payloads.
 - [x] With WoW stopped and consent, compare one game-written file's aggregate size (67,294 bytes) with its data-only whole-root projection (300,632 bytes); four fabricated fixtures matched the reference estimator. No records or identifiers were reported or retained. **One sample is not a worst-case serializer bound.**
