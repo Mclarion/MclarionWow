@@ -2,6 +2,8 @@
 
 ## Schema-3 draft handoff — no writer
 
+**0.11.11 installed; in-game check pending (5 October 2026):** The read-only `/mhwowmigrationpreflight` now validates cloned schema-2 item records using the existing item-writer payload checker before projecting an empty schema-3 skeleton. This does not validate character/bag/bank histories or a progression record, migrate data, or prove future upload bounds. Public runtime and installed 0.11.11 hashes matched with WoW stopped; a 0.11.10 backup remains outside `AddOns`. The changed report is not yet observed in game.
+
 **0.11.10 live dry run observed (player screenshot, 5 October 2026), not a contract validation:** `/mhwowmigrationpreflight` reported **301400/3000000 projected bytes (not actual file bytes); no data saved** and did not refuse. This supports only the read-only skeleton clone/projection on that current view. It does not establish a complete schema-3 record contract, actual serialized bytes, migration atomicity, consumer readiness or a progression writer. No repeat is needed for the unchanged view; WoW may be closed normally without `/reload` after this read-only result.
 
 **0.11.10 installed dry run; live command observed, not a contract change (5 October 2026):** `/mhwowmigrationpreflight` deep-clones a structurally supported schema-2 root, applies only the empty schema-3 skeleton with both capture settings disabled, projects the candidate, reports aggregate bytes, and discards it. Public source/install hashes and version matched with WoW stopped; independent rereview found no concrete release-blocking issue. It does not collect quest/reputation rows, validate all legacy wire semantics, assign schema 3, serialize a file, or close the writer/importer gates.

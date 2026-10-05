@@ -1,6 +1,6 @@
 # Draft schema 3 progression contract — 5 October 2026
 
-**Status: test-only, provisional contract. Not emitted by the addon, not accepted by either deployed importer, and not present in real SavedVariables.** The installed addon remains schema 2 and only exposes non-persisting diagnostics. The 0.11.10 candidate adds a read-only empty-progression schema-3 skeleton dry run, not an assignment or writer. A read-only independent addon review using `gpt-6-sol` identified unresolved scan-consistency, reputation-provenance, whole-file-size and legacy-preservation gates; passing wire/parser or dry-run tests does not close them.
+**Status: test-only, provisional contract. Not emitted by the addon, not accepted by either deployed importer, and not present in real SavedVariables.** Installed 0.11.11 remains schema 2 and only exposes non-persisting diagnostics. Its read-only empty-progression schema-3 skeleton dry run checks cloned item records but does not validate all legacy histories, assign schema 3 or write progression. A read-only independent addon review using `gpt-6-sol` identified unresolved scan-consistency, reputation-provenance, whole-file-size and legacy-preservation gates; passing wire/parser or dry-run tests does not close them. The 0.11.11 install is hash-verified, not yet game-run.
 
 ## Purpose and semantics
 
