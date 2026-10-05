@@ -1,6 +1,6 @@
 # Draft schema 3 progression contract — 5 October 2026
 
-**Status: test-only contract. Not emitted by the addon, not accepted by either importer, and not present in real SavedVariables.** The installed addon remains schema 2 and only exposes non-persisting diagnostics.
+**Status: test-only contract. Not emitted by the addon, not accepted by either deployed importer, and not present in real SavedVariables.** A private, uninstalled desktop source candidate independently accepts this fabricated shape in typed parser/transaction self-tests. The installed addon remains schema 2 and only exposes non-persisting diagnostics.
 
 ## Purpose and semantics
 
