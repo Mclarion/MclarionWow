@@ -534,6 +534,133 @@ function MclarionWow_ProbeProgressionNamespaced()
         namespacedQuestSummary(), namespacedFactionSummary())
 end
 
+-- Candidate diagnostic only. Compare complete bounded UI-index scans twice;
+-- even agreement is evidence for this view, not an atomic game snapshot.
+local function safetyQuestRow(read, index)
+    local ok, info = pcall(read, index)
+    if not ok then return nil, nil, "row call failed" end
+    if isSecret(info) then return nil, nil, "protected" end
+    if type(info) ~= "table" then return nil, nil, "row missing" end
+    if issecrettable(info) then return nil, nil, "protected" end
+    local fieldsOk, header, logIndex = pcall(function()
+        return info.isHeader, info.questLogIndex
+    end)
+    if not fieldsOk then return nil, nil, "field access failed" end
+    if isSecret(header) or isSecret(logIndex) then return nil, nil, "protected" end
+    if type(header) ~= "boolean" or not positiveInteger(logIndex) or
+        logIndex ~= index then return nil, nil, "row shape invalid" end
+    if header then
+        local titleOk, title = pcall(function() return info.title end)
+        if not titleOk then return nil, nil, "field access failed" end
+        if isSecret(title) then return nil, nil, "protected" end
+        if type(title) ~= "string" or #title == 0 or #title > 256 then
+            return nil, nil, "header identity unavailable"
+        end
+        return "header:" .. title, nil
+    end
+    local idOk, questId = pcall(function() return info.questID end)
+    if not idOk then return nil, nil, "field access failed" end
+    if isSecret(questId) then return nil, nil, "protected" end
+    if not positiveInteger(questId) or questId > 2147483647 then
+        return nil, nil, "quest ID invalid"
+    end
+    return tostring(questId), "leaf"
+end
+
+local function safetyFactionRow(read, index)
+    local ok, info = pcall(read, index)
+    if not ok then return nil, nil, "row call failed" end
+    if isSecret(info) then return nil, nil, "protected" end
+    if type(info) ~= "table" then return nil, nil, "row missing" end
+    if issecrettable(info) then return nil, nil, "protected" end
+    local fieldsOk, header, withRep, collapsed = pcall(function()
+        return info.isHeader, info.isHeaderWithRep, info.isCollapsed
+    end)
+    if not fieldsOk then return nil, nil, "field access failed" end
+    if isSecret(header) or isSecret(withRep) or isSecret(collapsed) then
+        return nil, nil, "protected"
+    end
+    if type(header) ~= "boolean" or type(withRep) ~= "boolean" or
+        type(collapsed) ~= "boolean" then return nil, nil, "row shape invalid" end
+    if header then
+        local nameOk, name = pcall(function() return info.name end)
+        if not nameOk then return nil, nil, "field access failed" end
+        if isSecret(name) then return nil, nil, "protected" end
+        if type(name) ~= "string" or #name == 0 or #name > 256 then
+            return nil, nil, "header identity unavailable"
+        end
+        return "header:" .. tostring(withRep) .. ":" .. tostring(collapsed) ..
+            ":" .. name, nil
+    end
+    local leafOk, factionId, reaction, barMin, barMax, barValue, accountWide =
+        pcall(function()
+            return info.factionID, info.reaction, info.currentReactionThreshold,
+                info.nextReactionThreshold, info.currentStanding, info.isAccountWide
+        end)
+    if not leafOk then return nil, nil, "field access failed" end
+    if isSecret(factionId) or isSecret(reaction) or isSecret(barMin) or
+        isSecret(barMax) or isSecret(barValue) or isSecret(accountWide) then
+        return nil, nil, "protected"
+    end
+    if not positiveInteger(factionId) or factionId > 2147483647 then
+        return nil, nil, "faction ID invalid"
+    end
+    if not positiveInteger(reaction) or reaction > 16 then
+        return nil, nil, "reaction invalid"
+    end
+    if not boundedStandingValue(barMin) or not boundedStandingValue(barMax) or
+        not boundedStandingValue(barValue) or barMin >= barMax or
+        barValue < barMin or barValue > barMax then
+        return nil, nil, "standing interval unsupported"
+    end
+    if type(accountWide) ~= "boolean" then
+        return nil, nil, "account-wide unavailable"
+    end
+    return table.concat({ factionId, reaction, barMin, barMax, barValue,
+        tostring(accountWide) }, ":"), accountWide and "account" or "character"
+end
+
+local function safetyScan(namespace, countName, rowName, limit, extract)
+    local read, reason = namespacedProgressionMethod(namespace, rowName)
+    if not read then return reason end
+    local first, count, counts = {}, nil, { leaf = 0, account = 0, character = 0 }
+    for pass = 1, 2 do
+        local current
+        current, reason = namespacedProgressionCount(namespace, countName, limit)
+        if not current then return reason end
+        if count and current ~= count then return "view changed" end
+        count = current
+        for index = 1, count do
+            local signature, category, problem = extract(read, index)
+            if not signature then return problem end
+            if pass == 1 then
+                first[index] = signature
+                if category then counts[category] = counts[category] + 1 end
+            elseif first[index] ~= signature then
+                return "view changed"
+            end
+        end
+    end
+    return counts, count
+end
+
+function MclarionWow_ProbeProgressionSafety()
+    local combat, err = combatStatus()
+    if combat == nil then return nil, err end
+    if combat then return nil, "Progression safety probe is unavailable during combat." end
+    local quests, questRows = safetyScan(C_QuestLog, "GetNumQuestLogEntries",
+        "GetInfo", 128, safetyQuestRow)
+    local factions, factionRows = safetyScan(C_Reputation, "GetNumFactions",
+        "GetFactionDataByIndex", 256, safetyFactionRow)
+    local questSummary = type(quests) == "table" and
+        string.format("stable %d/%d", quests.leaf, questRows) or quests
+    local factionSummary = type(factions) == "table" and
+        string.format("stable character %d, account-wide %d (%d visible rows)",
+            factions.character, factions.account, factionRows) or factions
+    return string.format("quest %s; reputation %s. No progression data saved.",
+        questSummary, factionSummary)
+end
+
 -- Shared fail-closed scanner for explicitly requested reads of the logged-in
 -- character's own purchased, currently viewable bank tabs. Account-bank IDs
 -- are rejected before any slots are read. Results are never persisted here.
@@ -1461,6 +1588,12 @@ SLASH_MCLARIONWOWPROGRESSNAMESPACED1 = "/mhwowprogressnamespaced"
 SlashCmdList.MCLARIONWOWPROGRESSNAMESPACED = function()
     local ok, report, err = pcall(MclarionWow_ProbeProgressionNamespaced)
     print("MclarionWow: " .. (ok and (report or err) or "Namespaced progression probe unavailable."))
+end
+
+SLASH_MCLARIONWOWPROGRESSSAFETY1 = "/mhwowprogresssafety"
+SlashCmdList.MCLARIONWOWPROGRESSSAFETY = function()
+    local ok, report, err = pcall(MclarionWow_ProbeProgressionSafety)
+    print("MclarionWow: " .. (ok and (report or err) or "Progression safety probe unavailable."))
 end
 
 local captureFrame = CreateFrame("Frame")

@@ -1,6 +1,6 @@
 # Draft schema 3 progression contract — 5 October 2026
 
-**Status: test-only contract. Not emitted by the addon, not accepted by either deployed importer, and not present in real SavedVariables.** A private, uninstalled desktop source candidate independently accepts this fabricated shape in typed parser/transaction self-tests. The installed addon remains schema 2 and only exposes non-persisting diagnostics.
+**Status: test-only, provisional contract. Not emitted by the addon, not accepted by either deployed importer, and not present in real SavedVariables.** The installed addon remains schema 2 and only exposes non-persisting diagnostics. A read-only independent addon review using `gpt-6-sol` identified unresolved scan-consistency, reputation-provenance, whole-file-size and legacy-preservation gates; passing wire/parser tests does not close them.
 
 ## Purpose and semantics
 
@@ -13,9 +13,9 @@ progression[characterGuid].quests[]
 progression[characterGuid].reputation[]
 ```
 
-Quest observations represent **active quest-log leaves visible at one instant**. Absence never proves completion, abandonment, or failure. Reputation observations represent **validated visible faction leaves at one instant**. Hidden or collapsed rows are not zero-valued factions, and visible rows are not a complete reputation ledger.
+Quest observations represent **active quest-log leaves visible in one stable scan**. Absence never proves completion, abandonment, or failure. Reputation observations represent **validated visible faction leaves in one stable scan made while the keyed character was logged in**. The character GUID identifies the observer, not necessarily the owner of an account-wide standing. Hidden or collapsed rows are not zero-valued factions, and visible rows are not a complete reputation ledger.
 
-The two settings are independent. Enabling character, bag, bank, item, or combat-log capture must not enable either progression source. A category scan must fail closed as a whole on protected, malformed, throwing, over-limit, or incomplete input; never persist a truncated scan.
+The two settings are independent. Enabling character, bag, bank, item, or combat-log capture must not enable either progression source. A category scan must fail closed as a whole on protected, malformed, throwing, over-limit, or incomplete input; never persist a truncated scan. The current diagnostic reads each row by mutable UI index after one count, which is sufficient for a non-persisting shape check but **not** for a snapshot writer. A future writer must compare a second complete guarded pass (count, row classification, IDs, and values), or an equivalent stable-view check, before committing; a changed/reordered view refuses the entire category without replacing its previous history. Mock a count change and a row reorder/value mutation mid-scan.
 
 ## Wire records
 
@@ -61,6 +61,8 @@ MHWOWR1|forever|timestamp|guid|build|visible-ui|visibleRows|leafCount|headerRepC
 - Empty only when `leafCount` is zero.
 - Maximum record size: 32768 bytes.
 
+**Unresolved provenance gate:** The build-70205 extracted `FactionData` declares `isAccountWide` and a reputation sort mode with Account and Character options. The installed aggregate-only row diagnostic neither reads nor validates these fields, and the current `MHWOWR1` entry has no account-wide marker. Before any writer, check whether the exact client exposes a safe, non-secret boolean for every leaf. The current five-field entry may be written only if every recorded leaf is confirmed character-specific; encountering an account-wide or unclassifiable leaf must refuse the whole reputation observation without touching prior data. Representing account-wide rows requires a separately versioned, explicitly scoped wire contract and new tests; do not silently reinterpret this draft or imply a standing belongs solely to the keyed character.
+
 Example using fabricated identifiers:
 
 ```text
@@ -75,6 +77,7 @@ MHWOWR1|forever|1720000001|Player-1234-ABCDEF12|70205|visible-ui|9|2|0|0|100:4:0
 - Each category history is a contiguous numeric array of 1–20 records ordered by strictly increasing timestamp.
 - Adjacent observations with identical state after removing only the timestamp are forbidden; the addon must deduplicate them before storage.
 - Aggregate progression wire bytes across all owners and both categories must not exceed 2 MiB.
+- This 2 MiB limit covers **only progression wire strings**, not schema-2 histories, keys, Lua serialization overhead, or the whole game-written file. The existing manual file upload limit is 4 MB. Before a writer, establish a conservative whole-file bound for the preserved roots **plus** the proposed progression state and serialization overhead, and refuse an addition if it cannot be proved to fit; verify the actual game-written file size only after WoW has saved and stopped. A progression-valid root is not automatically uploadable.
 - A rejected scan leaves the prior valid history unchanged. Schema migration must be atomic: schema 2 remains untouched unless the new root/settings pass this progression validator **and** all preserved character, bag, bank and item roots pass the existing schema-2 reader unchanged.
 
 ## Importer acceptance and idempotence
@@ -88,6 +91,10 @@ Both website and desktop importers must independently pass the same fabricated f
 5. Category failure is isolated: a rejected quest record must not erase valid legacy or reputation data, and vice versa.
 6. UI labels must say **active quest-log observation** and **visible reputation observation**, never completed quests or complete reputation history.
 
+## Populated legacy fixture scaffold (not a migration)
+
+`tests/test_schema3_populated_legacy.lua` composes a proposed schema-3 **test root** from each builder-generated, populated schema-2 fixture (`tests/schema2-synthetic.lua` and `tests/schema2-synthetic-explicit.lua`). It verifies unchanged character, bag, bank and item roots, semantically equivalent two-page implicit/explicit bank arrays, reference progression validation, and a negative control that detects a missing second bank metadata page. This does **not** exercise a future addon migration or prove its atomicity; the migration-preservation release gate remains open. The fixture is synthetic and was never read from a game save.
+
 ## Current executable evidence
 
-`tests/progression_contract.lua` is a test-only parser and **progression-extension** root validator; it checks allowed schema-3 root/settings keys and the new progression data but intentionally delegates validation of preserved schema-2 payloads to the existing readers. `tests/test_progression_contract.lua` covers canonical and malformed wires, owner binding, ordering, bounds, opt-in types, deduplication, history/owner/byte limits, and unknown keys. `tests/schema3-progression-synthetic.lua` is fabricated and keeps both new opt-ins off. Independent website and desktop source candidates now pass parser/storage/idempotence/presentation tests against these artifacts, including progression-only owner handling and required partial-observation labels/disclaimers. The website candidate also passes 20-state durable-retention tests and an isolated SQL Server migration/import/readback test; its transaction is compatible with the production retry strategy. Six pre-existing Identity model/snapshot differences unrelated to WoW still block a normal production migration. Deployment, private release and independent review remain open. These artifacts and source tests do not authorize an addon writer or production import.
+`tests/progression_contract.lua` is a test-only parser and **progression-extension** root validator; it checks allowed schema-3 root/settings keys and the new progression data but intentionally delegates validation of preserved schema-2 payloads to the existing readers. `tests/test_progression_contract.lua` covers canonical and malformed wires, owner binding, ordering, bounds, opt-in types, deduplication, history/owner/byte limits, and unknown keys. `tests/schema3-progression-synthetic.lua` is fabricated, leaves both new opt-ins off, and contains **empty** legacy histories. Before a writer, add a populated synthetic schema-2 before/after migration regression covering character, bag, bank and item records, including implicit and explicit bank-page arrays, and check that a failed scan changes none of them. The independent `gpt-6-sol` addon review was read-only; it found the four open gates documented above and did not run Lua tests on its host. No runtime addon, importer deployment, or live progression capture was changed by that review.

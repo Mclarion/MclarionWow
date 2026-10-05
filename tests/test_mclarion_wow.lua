@@ -649,6 +649,169 @@ if type(MclarionWow_ProbeProgressionNamespaced) == "function" then
     MclarionWowData = oldData
 end
 
+expectTrue(type(MclarionWow_ProbeProgressionSafety) == "function" and
+    type(SlashCmdList.MCLARIONWOWPROGRESSSAFETY) == "function",
+    "provides a manual, non-persisting two-pass progression safety probe")
+if type(MclarionWow_ProbeProgressionSafety) == "function" then
+    local oldQuestApi, oldReputationApi, oldData = C_QuestLog, C_Reputation, MclarionWowData
+    MclarionWowData = { schema = 2, characters = { ["Player-1234-ABCDEF12"] = { "existing" } } }
+    local expectedData = { schema = 2, characters = { ["Player-1234-ABCDEF12"] = { "existing" } } }
+    local questReads, factionReads = 0, 0
+    _G.C_QuestLog = {
+        GetNumQuestLogEntries = function() return 2 end,
+        GetInfo = function(index)
+            questReads = questReads + 1
+            if index == 1 then return { questLogIndex = 1, isHeader = true,
+                title = "Synthetic quest group" } end
+            return { questLogIndex = 2, isHeader = false, questID = 4242 }
+        end,
+    }
+    _G.C_Reputation = {
+        GetNumFactions = function() return 2 end,
+        GetFactionDataByIndex = function(index)
+            factionReads = factionReads + 1
+            return { isHeader = false, isHeaderWithRep = false, isCollapsed = false,
+                factionID = index, reaction = 4, currentReactionThreshold = 0,
+                nextReactionThreshold = 3000, currentStanding = 1200,
+                isAccountWide = index == 2 }
+        end,
+    }
+    local report, problem = MclarionWow_ProbeProgressionSafety()
+    expectEqual(problem, nil, "safety probe succeeds for a stable, classified view")
+    expectTrue(report and report:find("quest stable 1/2", 1, true) and
+        report:find("reputation stable character 1, account-wide 1", 1, true) and
+        report:find("No progression data saved.", 1, true) and
+        report:find("4242", 1, true) == nil and
+        questReads == 4 and factionReads == 4,
+        "two full scans compare rows but expose only aggregate provenance")
+    expectTrue(sameData(MclarionWowData, expectedData),
+        "safety probe never changes nested SavedVariables")
+    local questRead, factionRead = C_QuestLog.GetInfo, C_Reputation.GetFactionDataByIndex
+    local mutatingQuestReads = 0
+    C_QuestLog.GetInfo = function(index)
+        mutatingQuestReads = mutatingQuestReads + 1
+        local row = questRead(index)
+        if index == 2 and mutatingQuestReads > 2 then row.questID = 9001 end
+        return row
+    end
+    report = MclarionWow_ProbeProgressionSafety()
+    expectTrue(report and report:find("quest view changed", 1, true) and
+        report:find("reputation stable character 1, account-wide 1", 1, true) ~= nil,
+        "a changed quest ID between complete passes refuses only quest view")
+    C_QuestLog.GetInfo = questRead
+    local headerReads = 0
+    C_QuestLog.GetInfo = function(index)
+        local row = questRead(index)
+        if index == 1 then
+            headerReads = headerReads + 1
+            row.title = headerReads == 1 and "First quest group" or "Second quest group"
+        end
+        return row
+    end
+    report = MclarionWow_ProbeProgressionSafety()
+    expectTrue(report and report:find("quest view changed", 1, true) ~= nil,
+        "changed quest header identity between passes refuses the view")
+    C_QuestLog.GetInfo = questRead
+    local factionHeaderReads = 0
+    C_Reputation.GetFactionDataByIndex = function(index)
+        if index == 1 then
+            factionHeaderReads = factionHeaderReads + 1
+            return { isHeader = true, isHeaderWithRep = false,
+                isCollapsed = false, name = factionHeaderReads == 1 and
+                    "First faction group" or "Second faction group" }
+        end
+        return factionRead(index)
+    end
+    report = MclarionWow_ProbeProgressionSafety()
+    expectTrue(report and report:find("reputation view changed", 1, true) ~= nil,
+        "changed faction header identity between passes refuses the view")
+    C_Reputation.GetFactionDataByIndex = factionRead
+    local protectedHeader = protectedSentinel()
+    secretValues[protectedHeader] = true
+    C_QuestLog.GetInfo = function(index)
+        local row = questRead(index)
+        if index == 1 then row.title = protectedHeader end
+        return row
+    end
+    report = MclarionWow_ProbeProgressionSafety()
+    expectTrue(report and report:find("quest protected", 1, true) ~= nil,
+        "protected quest header identity is refused before comparison")
+    C_QuestLog.GetInfo = questRead
+    C_Reputation.GetFactionDataByIndex = function(index)
+        if index == 1 then return { isHeader = true, isHeaderWithRep = false,
+            isCollapsed = false, name = protectedHeader } end
+        return factionRead(index)
+    end
+    report = MclarionWow_ProbeProgressionSafety()
+    expectTrue(report and report:find("reputation protected", 1, true) ~= nil,
+        "protected faction header identity is refused before comparison")
+    secretValues[protectedHeader] = nil
+    C_Reputation.GetFactionDataByIndex = factionRead
+    local mutatingFactionReads = 0
+    C_Reputation.GetFactionDataByIndex = function(index)
+        mutatingFactionReads = mutatingFactionReads + 1
+        if mutatingFactionReads > 2 then index = 3 - index end
+        return factionRead(index)
+    end
+    report = MclarionWow_ProbeProgressionSafety()
+    expectTrue(report and report:find("quest stable 1/2", 1, true) and
+        report:find("reputation view changed", 1, true) ~= nil,
+        "faction reordering between passes refuses only reputation view")
+    C_Reputation.GetFactionDataByIndex = factionRead
+    local factionCount = C_Reputation.GetNumFactions
+    local countCalls = 0
+    C_Reputation.GetNumFactions = function()
+        countCalls = countCalls + 1
+        return countCalls == 1 and 2 or 1
+    end
+    report = MclarionWow_ProbeProgressionSafety()
+    expectTrue(report and report:find("reputation view changed", 1, true) ~= nil,
+        "changed visible row count between passes refuses the category")
+    C_Reputation.GetNumFactions = factionCount
+    C_Reputation.GetFactionDataByIndex = function(index)
+        local row = factionRead(index)
+        row.isAccountWide = nil
+        return row
+    end
+    report = MclarionWow_ProbeProgressionSafety()
+    expectTrue(report and report:find("reputation account-wide unavailable", 1, true) ~= nil,
+        "missing faction provenance is not treated as character-specific")
+    local secretFlag = protectedSentinel()
+    secretValues[secretFlag] = true
+    C_Reputation.GetFactionDataByIndex = function(index)
+        local row = factionRead(index)
+        row.isAccountWide = secretFlag
+        return row
+    end
+    report = MclarionWow_ProbeProgressionSafety()
+    expectTrue(report and report:find("reputation protected", 1, true) ~= nil,
+        "protected faction provenance is refused before boolean comparison")
+    secretValues[secretFlag] = nil
+    C_Reputation.GetFactionDataByIndex = function()
+        return setmetatable({ isHeader = false, isHeaderWithRep = false,
+            isCollapsed = false }, { __index = function() error("private field") end })
+    end
+    report = MclarionWow_ProbeProgressionSafety()
+    expectTrue(report and report:find("reputation field access failed", 1, true) and
+        report:find("private", 1, true) == nil,
+        "inaccessible leaf fields refuse without disclosing exception text")
+    C_Reputation.GetFactionDataByIndex = factionRead
+    C_Reputation.GetNumFactions = function() return 257 end
+    report = MclarionWow_ProbeProgressionSafety()
+    expectTrue(report and report:find("reputation over limit", 1, true) ~= nil,
+        "over-limit faction count refuses before per-row reads")
+    C_Reputation.GetNumFactions = factionCount
+    inCombat = true
+    report, problem = MclarionWow_ProbeProgressionSafety()
+    expectTrue(report == nil and problem and problem:find("combat", 1, true) ~= nil,
+        "safety probe refuses combat before reading either category")
+    inCombat = false
+    SlashCmdList.MCLARIONWOWPROGRESSSAFETY()
+    expectTrue(sameData(MclarionWowData, expectedData),
+        "safety probe failures and slash handler leave saved data untouched")
+    _G.C_QuestLog, _G.C_Reputation, MclarionWowData = oldQuestApi, oldReputationApi, oldData
+end
+
 expectTrue(type(MclarionWow_ProbeBank) == "function", "provides a manual count-only character bank probe")
 if type(MclarionWow_ProbeBank) == "function" then
     local oldSlots, oldInfo = C_Container.GetContainerNumSlots, C_Container.GetContainerItemInfo
