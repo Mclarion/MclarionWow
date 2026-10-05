@@ -2,6 +2,7 @@
 
 ## Addon-only next scope: Forever API evidence and writer safety
 
+- [x] Add a **test-only** clone-and-preflight reference around two populated schema-2 fixture roots. Both bank-array spellings preserve character/bag/bank/item values and the second bank page; rejected oversized/malformed proposals, aliased/cyclic observations and hostile root/settings metatables do not mutate the inputs. This does **not** test a runtime migration or validate all legacy payloads.
 - [x] With WoW stopped and consent, compare one game-written file's aggregate size (67,294 bytes) with its data-only whole-root projection (300,632 bytes); four fabricated fixtures matched the reference estimator. No records or identifiers were reported or retained. **One sample is not a worst-case serializer bound.**
 - [x] Add test-only **whole-root** size projection against both populated bank-array spellings and composed schema-3 roots; reject oversized escaped strings, cycles and unsupported keys. One stopped-game sample matched its conservative projection, but the provisional 3,000,000-byte envelope is **not worst-case calibrated** against Forever's SavedVariables serializer and does not close the 4 MB upload gate.
 - [x] Make the test-only `MHWOWR1` precondition ID-bound: all visible faction IDs must match the proposed wire and be verified non-account-wide; one true/missing/malformed/mismatched leaf refuses the entire category. The live 0.11.8 screenshot classifies seven visible leaves as character-scoped in **that view only**.
