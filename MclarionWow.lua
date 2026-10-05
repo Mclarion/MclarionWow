@@ -1037,6 +1037,84 @@ function MclarionWow_BuildBankItemExport(page)
     return export, nil, guid, page, pageCount, resolved, observed
 end
 
+-- Read-only whole-root projection. The game owns SavedVariables serialization;
+-- this envelope is deliberately not presented as actual on-disk bytes.
+local function estimateSavedRoot(root)
+    local limit, bytes, nodes, seen = 3000000, 4096, 0, {}
+    local function charge(amount)
+        if amount > limit - bytes then return nil, "over budget" end
+        bytes = bytes + amount
+        return true
+    end
+    local function visit(value, depth)
+        if isSecret(value) then return nil, "protected value" end
+        nodes = nodes + 1
+        if nodes > 50000 then return nil, "too many values" end
+        local kind = type(value)
+        if kind == "string" then
+            return charge(4 * #value + 16)
+        elseif kind == "number" then
+            if value ~= value or value == math.huge or value == -math.huge or
+                value ~= math.floor(value) or math.abs(value) > 9007199254740991 then
+                return nil, "unsupported number"
+            end
+            return charge(64)
+        elseif kind == "boolean" then
+            return charge(16)
+        elseif kind ~= "table" then
+            return nil, "unsupported value"
+        end
+        if issecrettable(value) then return nil, "protected table" end
+        if depth >= 8 then return nil, "too deep" end
+        local meta = getmetatable(value)
+        if isSecret(meta) or meta ~= nil then return nil, "metatable" end
+        if seen[value] then return nil, "repeated table" end
+        seen[value] = true
+        local ok, reason = charge(128 + depth * 32)
+        if not ok then return nil, reason end
+        for key, child in pairs(value) do
+            if isSecret(key) then return nil, "protected key" end
+            nodes = nodes + 1
+            if nodes > 50000 then return nil, "too many values" end
+            local keyKind = type(key)
+            if keyKind == "string" then
+                ok, reason = charge(128 + 4 * #key)
+            elseif keyKind == "number" and key > 0 and
+                key <= 2147483647 and key == math.floor(key) then
+                ok, reason = charge(192)
+            else
+                return nil, "unsupported key"
+            end
+            if not ok then return nil, reason end
+            ok, reason = visit(child, depth + 1)
+            if not ok then return nil, reason end
+        end
+        return true
+    end
+    local ok, reason = visit(root, 0)
+    if not ok then return nil, reason end
+    return bytes
+end
+
+function MclarionWow_ProbeSavedSize()
+    local combat, err = combatStatus()
+    if combat == nil then return nil, err end
+    if combat then return nil, "Size probe is unavailable during combat." end
+    local data = MclarionWowData
+    if isSecret(data) then return nil, "Saved data is protected by the client." end
+    if type(data) ~= "table" or issecrettable(data) then
+        return nil, "Saved data is unavailable or protected."
+    end
+    local meta = getmetatable(data)
+    if isSecret(meta) or meta ~= nil then return nil, "Saved data has a metatable." end
+    local schema = rawget(data, "schema")
+    if isSecret(schema) then return nil, "Saved schema is protected by the client." end
+    if schema ~= 1 and schema ~= 2 then return nil, "Saved schema is unsupported." end
+    local size, reason = estimateSavedRoot(data)
+    if not size then return nil, "Whole-save projection refused (" .. reason .. "). No data saved." end
+    return string.format("Whole-save projected %d/3000000 bytes (not actual file bytes). No data saved.", size)
+end
+
 local function storageRoot()
     if type(issecretvalue) ~= "function" or type(issecrettable) ~= "function" then
         return nil, "Saved data protection checks are unavailable."
@@ -1594,6 +1672,12 @@ SLASH_MCLARIONWOWPROGRESSSAFETY1 = "/mhwowprogresssafety"
 SlashCmdList.MCLARIONWOWPROGRESSSAFETY = function()
     local ok, report, err = pcall(MclarionWow_ProbeProgressionSafety)
     print("MclarionWow: " .. (ok and (report or err) or "Progression safety probe unavailable."))
+end
+
+SLASH_MCLARIONWOWSIZEPROBE1 = "/mhwowsizeprobe"
+SlashCmdList.MCLARIONWOWSIZEPROBE = function()
+    local ok, report, err = pcall(MclarionWow_ProbeSavedSize)
+    print("MclarionWow: " .. (ok and (report or err) or "Size probe unavailable."))
 end
 
 local captureFrame = CreateFrame("Frame")

@@ -812,6 +812,148 @@ if type(MclarionWow_ProbeProgressionSafety) == "function" then
     _G.C_QuestLog, _G.C_Reputation, MclarionWowData = oldQuestApi, oldReputationApi, oldData
 end
 
+expectTrue(type(MclarionWow_ProbeSavedSize) == "function" and
+    type(SlashCmdList.MCLARIONWOWSIZEPROBE) == "function",
+    "provides a manual, non-persisting whole-save size diagnostic")
+if type(MclarionWow_ProbeSavedSize) == "function" then
+    local oldData = MclarionWowData
+    MclarionWowData = { schema = 2, settings = { autoCombatLog = false },
+        characters = { ["Player-1234-ABCDEF12"] = { "MHWOW2|synthetic|value" } },
+        items = { ["Player-1234-ABCDEF12"] = { bank = { "page one", "page two" } } } }
+    local snapshot = { schema = 2, settings = { autoCombatLog = false },
+        characters = { ["Player-1234-ABCDEF12"] = { "MHWOW2|synthetic|value" } },
+        items = { ["Player-1234-ABCDEF12"] = { bank = { "page one", "page two" } } } }
+    local expected = assert(dofile("save_size_projection.lua").estimate(snapshot))
+    local report, problem = MclarionWow_ProbeSavedSize()
+    expectEqual(problem, nil, "supported synthetic root can be projected")
+    expectTrue(report and report:find(tostring(expected), 1, true) and
+        report:find("not actual file bytes", 1, true) and
+        report:find("No data saved.", 1, true) and
+        report:find("Player-", 1, true) == nil,
+        "size diagnostic matches whole-root reference without disclosing records")
+    expectTrue(sameData(MclarionWowData, snapshot),
+        "size diagnostic does not change nested SavedVariables")
+    SlashCmdList.MCLARIONWOWSIZEPROBE()
+    expectTrue(sameData(MclarionWowData, snapshot),
+        "size slash handler is also read-only")
+    inCombat = true
+    report, problem = MclarionWow_ProbeSavedSize()
+    expectTrue(report == nil and problem and problem:find("combat", 1, true) and
+        sameData(MclarionWowData, snapshot),
+        "size diagnostic refuses combat before traversing saved data")
+    inCombat = false
+    local protected = protectedSentinel()
+    secretValues[protected] = true
+    MclarionWowData = protected
+    local safeCall
+    safeCall, report, problem = pcall(MclarionWow_ProbeSavedSize)
+    expectTrue(safeCall and report == nil and problem and
+        problem:find("protected", 1, true) ~= nil,
+        "protected root refuses without inspecting its metatable or contents")
+    secretValues[protected] = nil
+    MclarionWowData = snapshot
+    secretTables[snapshot.items] = true
+    safeCall, report, problem = pcall(MclarionWow_ProbeSavedSize)
+    expectTrue(safeCall and report == nil and problem and
+        problem:find("protected", 1, true) and sameData(snapshot, MclarionWowData),
+        "protected nested table refuses without replacing saved data")
+    secretTables[snapshot.items] = nil
+    local secretScalar = "synthetic protected scalar"
+    snapshot.settings.protectedScalar = secretScalar
+    secretValues[secretScalar] = true
+    safeCall, report, problem = pcall(MclarionWow_ProbeSavedSize)
+    expectTrue(safeCall and report == nil and problem and
+        problem:find("protected value", 1, true) ~= nil,
+        "protected scalar child refuses before length or formatting")
+    secretValues[secretScalar], snapshot.settings.protectedScalar = nil, nil
+    local secretKey = "synthetic secret key"
+    snapshot.settings[secretKey] = true
+    secretValues[secretKey] = true
+    report, problem = MclarionWow_ProbeSavedSize()
+    expectTrue(report == nil and problem and problem:find("protected key", 1, true) ~= nil,
+        "protected key refuses before measuring its length")
+    secretValues[secretKey], snapshot.settings[secretKey] = nil, nil
+    local cycle = { schema = 2 }
+    cycle.characters = cycle
+    MclarionWowData = cycle
+    report, problem = MclarionWow_ProbeSavedSize()
+    expectTrue(report == nil and problem and problem:find("repeated table", 1, true) and
+        cycle.characters == cycle, "cyclic root refuses without mutation")
+    local over = { schema = 2, characters = { payload = string.rep("a", 750000) } }
+    MclarionWowData = over
+    report, problem = MclarionWow_ProbeSavedSize()
+    expectTrue(report == nil and problem and problem:find("over budget", 1, true) and
+        #over.characters.payload == 750000,
+        "oversized whole-root proposal refuses without replacing its value")
+    local touched = false
+    MclarionWowData = setmetatable({}, { __index = function()
+        touched = true
+        return 2
+    end })
+    report, problem = MclarionWow_ProbeSavedSize()
+    expectTrue(report == nil and problem and problem:find("metatable", 1, true) and
+        not touched, "hostile root refuses before schema member lookup")
+    touched = false
+    MclarionWowData = { schema = 2, characters = setmetatable({}, { __index = function()
+        touched = true
+        return "unexpected"
+    end }), items = {} }
+    report, problem = MclarionWow_ProbeSavedSize()
+    expectTrue(report == nil and problem and problem:find("metatable", 1, true) and
+        not touched, "hostile nested table refuses without invoking its metatable")
+    local deep = { schema = 2, characters = {}, items = {} }
+    local cursor = deep.characters
+    for _ = 1, 8 do
+        cursor.child = {}
+        cursor = cursor.child
+    end
+    MclarionWowData = deep
+    report, problem = MclarionWow_ProbeSavedSize()
+    expectTrue(report == nil and problem and problem:find("too deep", 1, true) ~= nil,
+        "over-depth roots refuse before unbounded traversal")
+    local oldSecretValue, oldSecretTable = issecretvalue, issecrettable
+    issecretvalue = nil
+    report, problem = MclarionWow_ProbeSavedSize()
+    expectTrue(report == nil and problem and problem:find("Protection checks", 1, true) ~= nil,
+        "missing protection primitive refuses before saved-data traversal")
+    issecretvalue, issecrettable = oldSecretValue, oldSecretTable
+    MclarionWowData = { schema = 3, characters = {} }
+    report, problem = MclarionWow_ProbeSavedSize()
+    expectTrue(report == nil and problem and problem:find("unsupported", 1, true) and
+        MclarionWowData.schema == 3, "future schema refuses unchanged")
+    local oldPrint, printed = print
+    print = function(message) printed = message end
+    SlashCmdList.MCLARIONWOWSIZEPROBE()
+    print = oldPrint
+    expectTrue(printed == "MclarionWow: Saved schema is unsupported." and
+        printed:find("Player-", 1, true) == nil,
+        "size slash refusal prints only a fixed non-identifying reason")
+    local function loadFixtureEnvironment(path)
+        local environment = {}
+        local fixtureChunk
+        if type(setfenv) == "function" then
+            fixtureChunk = assert(loadfile(path))
+            setfenv(fixtureChunk, environment)
+        else
+            fixtureChunk = assert(loadfile(path, "t", environment))
+        end
+        fixtureChunk()
+        return environment
+    end
+    for _, fixture in ipairs({ "schema2-synthetic.lua", "schema2-synthetic-explicit.lua" }) do
+        local environment = loadFixtureEnvironment(fixture)
+        local populated = assert(environment.MclarionWowData)
+        local projected = assert(dofile("save_size_projection.lua").estimate(populated))
+        MclarionWowData = populated
+        report, problem = MclarionWow_ProbeSavedSize()
+        expectTrue(problem == nil and report and
+            report:find(tostring(projected), 1, true) ~= nil and
+            #populated.items["Player-1234-ABCDEF12"].bank == 2,
+            "size diagnostic includes both pages in the " .. fixture .. " root")
+    end
+    MclarionWowData = oldData
+end
+
 expectTrue(type(MclarionWow_ProbeBank) == "function", "provides a manual count-only character bank probe")
 if type(MclarionWow_ProbeBank) == "function" then
     local oldSlots, oldInfo = C_Container.GetContainerNumSlots, C_Container.GetContainerItemInfo

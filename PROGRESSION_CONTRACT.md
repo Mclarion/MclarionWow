@@ -2,6 +2,8 @@
 
 ## Schema-3 draft handoff — no writer
 
+**0.11.9 diagnostic candidate, not a contract change:** `/mhwowsizeprobe` would report an aggregate projection of the current schema-1/2 SavedVariables root in memory. It is not actual serialized bytes, schema-3 migration, per-record provenance, or full-file upload proof. It never saves progression; a live Forever-client result is still required.
+
 **Test-only preflight reference:** `tests/schema3_preflight.lua` deep-clones synthetic populated schema-2 data, applies draft progression/default-off settings, validates the draft root and provisional whole-file projection, and refuses invalid or oversized candidates without changing either input. `tests/test_schema3_preflight.lua` checks both bank-array encodings and exact second-page preservation. This is not runtime migration, live account-wide provenance or complete legacy-payload validation; actual writer gates remain open.
 
 **One consented stopped-game size sample (5 October 2026):** The game-written addon file was 67,294 bytes; a data-only scanner applying the test projection to that current root counted 300,632 bytes (233,338 bytes of sample margin). Four fabricated serialized fixtures matched `tests/save_size_projection.lua` exactly. No raw player content, identifiers or account paths were output or retained. This does not establish a future or worst-case bound; no writer was installed.
