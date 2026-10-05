@@ -2,6 +2,7 @@
 -- SavedVariables, or the WoW serializer; no live secret-value checks.
 local Contract = dofile("tests/progression_contract.lua")
 local Projection = dofile("tests/save_size_projection.lua")
+local LegacyShape = dofile("tests/schema2_legacy_shape.lua")
 local Preflight = {}
 
 local function clone(value, depth, seen)
@@ -32,6 +33,7 @@ function Preflight.prepare(source, progression, limit)
         return nil, "invalid source"
     end
     if not Projection.estimate(source) then return nil, "unsupported source" end
+    if not LegacyShape.validate(source) then return nil, "unsupported legacy shape" end
     -- Bound the new graph before cloning it, not only after composing the root.
     if not Projection.estimate(progression) then return nil, "unsupported observations" end
     local seen = {}
