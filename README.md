@@ -1,5 +1,9 @@
 # MclarionWow
 
+## Current installation — 0.12.1-candidate, 6 October 2026
+
+At the player's request, public runtime `4319e3d5a11ad91588b3b53a0230dc98ad8fd9ce` was installed in both addon folders with WoW stopped on client 1.60.1.70235. Anonymous public-source checks and separate installed readback matched all seven runtime files; both versions and all four existing enabled-state files were verified. Both previous 0.12.0 addon folders are retained outside AddOns for rollback. No player SavedVariables were read or modified. New event capture and rendered status UI await normal-play testing; the earlier 0.12.0 disk-persistence result is not a live verification of 0.12.1. Earlier offline/pending-install notes below are historical. Next: enable desired auto categories, play normally, inspect `/mhwowui` statuses and exit normally; no migration probes or forced title/PvP/currency activity.
+
 ## Offline 0.12.1-candidate — responsive capture and status (6 October 2026)
 
 **Reviewed package ready:** Independent targeted rereview passed after all four scheduling/status findings were fixed. The final integration suite passed 656 assertions on each Lua 5.1/5.4 and all 24 broader Lua runs passed. Parent rebuilt `artifacts/MclarionWow-0.12.1-candidate-reviewed.zip`, verified seven runtime files against current source, archive integrity, two Python package tests and identical repeat-build bytes. SHA-256: `ab6e1dd51452f6a4f1811ccf789791e9e27087a58f757bd1b850aaa28f982e3a`. This supersedes the earlier pre-review offline ZIP. Not installed, committed or published; installed 0.12.0 remains untouched. Live event delivery and rendered UI remain unverified.

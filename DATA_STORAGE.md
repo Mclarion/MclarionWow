@@ -1,5 +1,9 @@
 # MclarionWow: current SavedVariables handoff
 
+## Installed successor — 0.12.1-candidate, 6 October 2026
+
+Player authorized publication/installation. Runtime `4319e3d5a11ad91588b3b53a0230dc98ad8fd9ce` was anonymously verified and installed as both addon folders with WoW stopped (client 1.60.1.70235). Independent readback verified all seven new hashes, both version headers, four unchanged enabled-state files, and both previous 0.12.0 addon folders in rollback storage outside AddOns. ZIP SHA-256 `ab6e1dd51452f6a4f1811ccf789791e9e27087a58f757bd1b850aaa28f982e3a`. No SavedVariables inspection/change or schema migration occurred. Live event behavior/rendered UI and restart survival remain pending; earlier 0.12.0 normal-exit evidence remains scoped to that build. New status timestamps mean successful in-memory capture only. All offline/not-installed notes below describe earlier development stages and are superseded by this installed-status entry. Next normal-play test: desired opt-ins, naturally occurring changes, inspect status window, normal exit; no repeated diagnostic commands.
+
 **0.12.1 offline artifact gate passed:** Independent rereview accepted the four scheduling/status fixes; 656 integration assertions per Lua 5.1/5.4 and all 24 broader Lua runs passed. Parent packaging checks passed two Python tests, exact seven-source-file matching and reproducible archive SHA-256 `ab6e1dd51452f6a4f1811ccf789791e9e27087a58f757bd1b850aaa28f982e3a` at `artifacts/MclarionWow-0.12.1-candidate-reviewed.zip`. Earlier offline package hashes are superseded. No storage schema changes; no publication, installation or player-save inspection in this offline gate. Installed 0.12.0 and its observed normal-exit persistence remain unchanged. In-client event delivery and UI geometry are still unverified.
 
 ## Offline successor 0.12.1-candidate — not installed

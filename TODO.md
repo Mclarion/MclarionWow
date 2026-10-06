@@ -1,5 +1,8 @@
 # MclarionWow handoff TODO — 2026-10-05
 
+- [x] Authorized 0.12.1 publication/install completed 6 October: runtime `4319e3d5a11ad91588b3b53a0230dc98ad8fd9ce`, seven public/installed file hashes, both versions, four enabled states and complete 0.12.0 paired backup independently verified with WoW stopped. No player save read or change.
+- [ ] Observe 0.12.1 event capture and rendered statuses during normal play; no repeated preflight and no need to manufacture PvP/title/currency changes. Earlier offline installation gates below are now complete; live validation remains pending.
+
 - [x] Finish 0.12.1 targeted rereview and rebuild: no remaining blocker in the four findings, 656 assertions per interpreter/all 24 Lua runs passed; two Python package tests and seven-file source/reproducibility verification passed. Reviewed ZIP SHA-256 `ab6e1dd51452f6a4f1811ccf789791e9e27087a58f757bd1b850aaa28f982e3a`.
 - [ ] When authorized and the player is available, publish/install the reviewed 0.12.1 candidate with backup/readback and check events/rendered statuses during normal play. Do not replace the working 0.12.0 during this offline-only stage.
 
