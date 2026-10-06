@@ -1,5 +1,15 @@
 # MclarionWow handoff TODO — 2026-10-05
 
+- [x] Finish 0.12.1 targeted rereview and rebuild: no remaining blocker in the four findings, 656 assertions per interpreter/all 24 Lua runs passed; two Python package tests and seven-file source/reproducibility verification passed. Reviewed ZIP SHA-256 `ab6e1dd51452f6a4f1811ccf789791e9e27087a58f757bd1b850aaa28f982e3a`.
+- [ ] When authorized and the player is available, publish/install the reviewed 0.12.1 candidate with backup/readback and check events/rendered statuses during normal play. Do not replace the working 0.12.0 during this offline-only stage.
+
+## Offline 0.12.1-candidate continuation — 6 October 2026
+
+- [x] Stages 2/3 together: source-matched money/currency/PvP-rank notifications, bounded first-event coalescing, combat deferral, preserved world/post-combat/300-second retries and six-category two-page status (auto state, last successful in-memory time, distinct result/refusal). Manual capture and default-off preferences remain. No title-specific event was verified; title keeps safe retries. Pinned source references and 70205-versus-70235 limitation are documented in README and DATA_STORAGE.
+- [x] Regression-first integration repair: six per-category pending slots survive same-second silence, transient combat-status failures and periodic/post-combat fallback until completion/refusal or opt-out. First-event debounce is 0.35 seconds; unavailable paths use bounded backoff to 300 seconds rather than per-frame scans. Shared manual/auto status classification guards secret results before comparison, treats unknown success as unavailable, and never prints private error payloads; manual scans do not enable automation. Lua 5.1/5.4 narrow integration: 656 assertions each. No new storage schema, game validation or artifact rebuild in this step.
+- [ ] Release gate remains: independent rereview, artifact rebuild/verification by parent, publication, verified source hash and stopped-game paired installation, followed by naturally occurring play/restart observations. Do **not** request a diagnostic-only login. No player saves, consumers or local GitLab are part of this offline step.
+- [ ] Stage 4 richer quest/coverage semantics and companion consumer handoff require separate evidence and authorization; visible/collapsed faction and currency lists are not complete datasets. No claim of Lua disk persistence.
+
 ## Combined candidate test delivery
 
 - [x] Combine all six categories in the two-addon package; fix the two honor/title review blockers and rebuild verified source-matched archive.

@@ -2796,6 +2796,24 @@ local retainedWealth, retainedHonor = MclarionWowWealthData, MclarionWowHonorTit
 actionFrame.scripts.OnEvent(actionFrame, "PLAYER_REGEN_ENABLED")
 expectEqual(MclarionWowWealthData, retainedWealth, "unchanged wealth observation deduplicates")
 expectEqual(MclarionWowHonorTitleData, retainedHonor, "unchanged honor/title observation deduplicates")
+now=now+1;copper=copper+1;currencyQuantity=currencyQuantity+1;honorCount=honorCount+1
+actionFrame.scripts.OnEvent(actionFrame,"PLAYER_MONEY")
+actionFrame.scripts.OnEvent(actionFrame,"CURRENCY_DISPLAY_UPDATE")
+actionFrame.scripts.OnEvent(actionFrame,"PLAYER_PVP_RANK_CHANGED")
+actionFrame.scripts.OnUpdate(actionFrame,0.36)
+expectEqual(#MclarionWowWealthData.characters[actionGuid].gold,3,
+    "money event appends one changed real-module observation")
+expectEqual(#MclarionWowWealthData.characters[actionGuid].currency,3,
+    "currency event appends one changed real-module observation")
+expectEqual(#MclarionWowHonorTitleData.characters[actionGuid].honor,3,
+    "rank event appends one changed real-module observation")
+retainedWealth,retainedHonor=MclarionWowWealthData,MclarionWowHonorTitleData
+actionFrame.scripts.OnEvent(actionFrame,"PLAYER_MONEY")
+actionFrame.scripts.OnEvent(actionFrame,"CURRENCY_DISPLAY_UPDATE")
+actionFrame.scripts.OnEvent(actionFrame,"PLAYER_PVP_RANK_CHANGED")
+actionFrame.scripts.OnUpdate(actionFrame,0.36)
+expectEqual(MclarionWowWealthData,retainedWealth,"unchanged event observations create no duplicate wealth snapshot")
+expectEqual(MclarionWowHonorTitleData,retainedHonor,"unchanged event observations create no duplicate PvP snapshot")
 for index=8,11 do controls[index]:SetChecked(false);controls[index].scripts.OnClick(controls[index]) end
 retainedWealth, retainedHonor = MclarionWowWealthData, MclarionWowHonorTitleData
 now=now+1;copper=copper+1;honorCount=honorCount+1
@@ -2872,6 +2890,288 @@ end
 expectTrue(not MclarionWow_GoldAutoEnabled() and not MclarionWow_CurrencyAutoEnabled() and
     not MclarionWow_HonorAutoEnabled() and not MclarionWow_TitleAutoEnabled(),
     "synthetic reload retains four separate off preferences")
+
+-- Source-verified burst notifications are coalesced; the last successful
+-- in-memory observation survives later refusal and never implies disk flush.
+MclarionWowData = {schema=1, characters={}, settings={autoCombatLog=false}}
+MclarionWowWealthData, MclarionWowHonorTitleData = nil, nil
+local eventCalls = {gold=0, currency=0, honor=0, title=0}
+local originalFns = {MclarionWow_CaptureGold, MclarionWow_CaptureCurrency,
+    MclarionWow_CaptureHonor, MclarionWow_CaptureTitle,
+    MclarionWow_GoldAutoEnabled, MclarionWow_CurrencyAutoEnabled,
+    MclarionWow_HonorAutoEnabled, MclarionWow_TitleAutoEnabled}
+local outcomes = {gold="saved",currency="saved",honor="saved",title="saved"}
+local originalDate = date
+_G.date = os.date
+local function fakeCapture(key)
+    return function(manual)
+        eventCalls[key] = eventCalls[key]+1
+        if outcomes[key] == "refused" then return nil, "refused" end
+        return true, outcomes[key]
+    end
+end
+MclarionWow_CaptureGold = fakeCapture("gold")
+MclarionWow_CaptureCurrency = fakeCapture("currency")
+MclarionWow_CaptureHonor = fakeCapture("honor")
+MclarionWow_CaptureTitle = fakeCapture("title")
+MclarionWow_GoldAutoEnabled = function() return true end
+MclarionWow_CurrencyAutoEnabled = function() return false end
+MclarionWow_HonorAutoEnabled = function() return true end
+MclarionWow_TitleAutoEnabled = function() return false end
+chunk("MclarionWow", {})
+local timingFrame
+for index=#frames,1,-1 do if frames[index].events and frames[index].events.PLAYER_ENTERING_WORLD then
+    timingFrame=frames[index];break end end
+expectTrue(timingFrame.events.PLAYER_MONEY and timingFrame.events.CURRENCY_DISPLAY_UPDATE and
+    timingFrame.events.PLAYER_PVP_RANK_CHANGED, "only verified balance/rank events registered")
+expectEqual(timingFrame.events.NEW_TITLE_EARNED,nil,"unverified title event not registered")
+timingFrame.scripts.OnEvent(timingFrame,"PLAYER_ENTERING_WORLD")
+local baseGold,baseHonor=eventCalls.gold,eventCalls.honor
+for i=1,20 do
+    timingFrame.scripts.OnEvent(timingFrame,"PLAYER_MONEY")
+    timingFrame.scripts.OnEvent(timingFrame,"CURRENCY_DISPLAY_UPDATE")
+    timingFrame.scripts.OnEvent(timingFrame,"PLAYER_PVP_RANK_CHANGED")
+end
+expectEqual(eventCalls.gold,baseGold,"gold burst defers scans")
+expectEqual(eventCalls.honor,baseHonor,"honor burst defers scans")
+timingFrame.scripts.OnUpdate(timingFrame,0.19)
+expectEqual(eventCalls.gold,baseGold,"short interval keeps burst pending")
+timingFrame.scripts.OnUpdate(timingFrame,0.20)
+expectEqual(eventCalls.gold,baseGold+1,"burst results in exactly one gold scan")
+expectEqual(eventCalls.honor,baseHonor+1,"burst results in exactly one honor scan")
+expectEqual(eventCalls.currency,0,"disabled currency never scans or creates root")
+expectEqual(eventCalls.title,0,"disabled title never scans or creates root")
+expectEqual(MclarionWowWealthData,nil,"disabled/mock paths do not create wealth data")
+local timingPanel
+SlashCmdList.MCLARIONWOWUI()
+for index=#frames,1,-1 do if frames[index].name=="MclarionWowSettingsFrame" then
+    timingPanel=frames[index];break end end
+local function timingStatus(part)
+    for _,label in ipairs(timingPanel.fontStrings) do
+        if label.text and label.text:find(part,1,true) then return true end
+    end
+    return false
+end
+expectTrue(timingStatus("Gold: Scanned; captured in memory") and
+    timingStatus("Auto: on") and timingStatus("Last success (memory, this session):"),
+    "status identifies memory result, automation, and last successful time")
+expectTrue(timingStatus("Currencies: ") and timingStatus("Auto: off"),
+    "disabled category status exposes automation off")
+expectTrue(timingStatus("Quests: ") and timingStatus("Reputation: ") and
+    timingStatus("Titles: "), "both pages expose category-specific status")
+local firstSuccess=os.date("!%Y-%m-%d %H:%M:%S UTC",now)
+outcomes.gold="refused"
+now=now+60
+timingFrame.scripts.OnEvent(timingFrame,"PLAYER_MONEY")
+timingFrame.scripts.OnUpdate(timingFrame,0.4)
+expectTrue(timingStatus("Gold: Automatic scan refused") and
+    timingStatus("Last success (memory, this session): "..firstSuccess),
+    "refusal remains distinct and does not advance last success")
+inCombat=true
+outcomes.gold="saved"
+timingFrame.scripts.OnEvent(timingFrame,"PLAYER_MONEY")
+timingFrame.scripts.OnUpdate(timingFrame,0.4)
+expectEqual(eventCalls.gold,baseGold+2,"combat defers a pending event scan")
+inCombat=false
+now=now+1
+timingFrame.scripts.OnEvent(timingFrame,"PLAYER_REGEN_ENABLED")
+expectEqual(eventCalls.gold,baseGold+3,"post-combat retry captures deferred event once")
+local manualGold
+for _,frame in ipairs(frames) do if frame.parent==timingPanel and frame.text=="Gold now" then manualGold=frame end end
+outcomes.gold="unchanged"
+manualGold.scripts.OnClick(manualGold)
+expectTrue(timingStatus("Gold: Scanned; unchanged"),"manual unchanged differs from captured memory")
+local beforePeriod=eventCalls.gold
+timingFrame.scripts.OnUpdate(timingFrame,300)
+expectEqual(eventCalls.gold,beforePeriod+1,"periodic fallback remains active")
+local originalCreateFrame = CreateFrame
+CreateFrame = function(kind,name,parent,template)
+    local frame=originalCreateFrame(kind,name,parent,template)
+    if name==nil and parent==nil and kind=="Frame" then
+        local register=frame.RegisterEvent
+        frame.RegisterEvent=function(self,event)
+            if event=="PLAYER_MONEY" or event=="CURRENCY_DISPLAY_UPDATE" or
+                event=="PLAYER_PVP_RANK_CHANGED" then error("optional event absent") end
+            return register(self,event)
+        end
+    end
+    return frame
+end
+expectTrue(pcall(chunk,"MclarionWow",{}),"optional event registration failure leaves addon loadable")
+CreateFrame=originalCreateFrame
+local fallbackFrame
+for index=#frames,1,-1 do if frames[index].events and frames[index].events.PLAYER_ENTERING_WORLD then
+    fallbackFrame=frames[index];break end end
+expectEqual(fallbackFrame.events.PLAYER_MONEY,nil,"missing optional event is not required")
+local beforeFallback=eventCalls.gold
+fallbackFrame.scripts.OnEvent(fallbackFrame,"PLAYER_ENTERING_WORLD")
+fallbackFrame.scripts.OnUpdate(fallbackFrame,300)
+expectEqual(eventCalls.gold,beforeFallback+2,"world and periodic fallback survive missing optional events")
+for index,name in ipairs({"MclarionWow_CaptureGold","MclarionWow_CaptureCurrency",
+    "MclarionWow_CaptureHonor","MclarionWow_CaptureTitle",
+    "MclarionWow_GoldAutoEnabled","MclarionWow_CurrencyAutoEnabled",
+    "MclarionWow_HonorAutoEnabled","MclarionWow_TitleAutoEnabled"}) do _G[name]=originalFns[index] end
+_G.date = originalDate
+
+-- Retry outcomes are tested through the event frame and UI, never queue internals.
+;(function()
+local retryNames = {"Quests", "Reputation", "Gold", "Currency", "Honor", "Title"}
+local retryKeys = {"quest", "reputation", "gold", "currency", "honor", "title"}
+local retryEvents = {"QUEST_LOG_UPDATE", "UPDATE_FACTION", "PLAYER_MONEY",
+    "CURRENCY_DISPLAY_UPDATE", "PLAYER_PVP_RANK_CHANGED"}
+local retryOriginal = {}
+local retryCalls, retryOutcomes, retryEnabled = {}, {}, {}
+for i, name in ipairs(retryNames) do
+    local captureName, enabledName = "MclarionWow_Capture" .. name,
+        "MclarionWow_" .. (i == 1 and "Quest" or name) .. "AutoEnabled"
+    retryOriginal[i] = {_G[captureName], _G[enabledName]}
+    retryCalls[i], retryOutcomes[i], retryEnabled[i] = 0, "saved", true
+    _G[captureName] = function(manual)
+        retryCalls[i] = retryCalls[i] + 1
+        local outcome = retryOutcomes[i]
+        if type(outcome) == "function" then return outcome(manual) end
+        if outcome == "refused" then return nil, "private player payload" end
+        return true, outcome
+    end
+    _G[enabledName] = function() return retryEnabled[i] end
+end
+chunk("MclarionWow", {})
+local retryFrame
+for i=#frames,1,-1 do if frames[i].events and frames[i].events.PLAYER_ENTERING_WORLD then
+    retryFrame=frames[i]; break end end
+retryFrame.scripts.OnEvent(retryFrame, "PLAYER_ENTERING_WORLD")
+local retryPanel
+SlashCmdList.MCLARIONWOWUI()
+for i=#frames,1,-1 do if frames[i].name == "MclarionWowSettingsFrame" then
+    retryPanel=frames[i]; break end end
+local function retryStatus(fragment)
+    for _, label in ipairs(retryPanel.fontStrings) do
+        if label.text and label.text:find(fragment, 1, true) then return true end
+    end
+    return false
+end
+local retryButtons = {}
+for _, frame in ipairs(frames) do
+    if frame.parent == retryPanel and frame.frameType == "Button" then
+        retryButtons[frame.text] = frame
+    end
+end
+for i=1,6 do retryOutcomes[i] = "same-second" end
+local baseline = {}
+for i=1,6 do baseline[i] = retryCalls[i] end
+for _, event in ipairs(retryEvents) do retryFrame.scripts.OnEvent(retryFrame,event) end
+retryFrame.scripts.OnEvent(retryFrame,"PLAYER_REGEN_ENABLED")
+retryFrame.scripts.OnUpdate(retryFrame,0.4)
+for i=1,6 do expectTrue(retryCalls[i] > baseline[i], retryKeys[i] .. " same-second was attempted") end
+local held = {}
+for i=1,6 do held[i] = retryCalls[i]; retryOutcomes[i] = "saved" end
+retryFrame.scripts.OnUpdate(retryFrame,10)
+for i=1,6 do expectEqual(retryCalls[i],held[i],retryKeys[i] .. " does not hot retry in same server second") end
+now=now+1
+retryFrame.scripts.OnUpdate(retryFrame,0.4)
+for i=1,6 do expectEqual(retryCalls[i],held[i]+1,retryKeys[i] .. " retries after clock advances without another event") end
+
+-- A failed combat-status query on regen and periodic fallback must retain work.
+for i=1,6 do retryOutcomes[i] = "same-second" end
+retryFrame.scripts.OnEvent(retryFrame,"PLAYER_REGEN_ENABLED")
+local savedCombat = InCombatLockdown
+InCombatLockdown = function() error("temporarily unavailable") end
+now=now+1
+retryFrame.scripts.OnEvent(retryFrame,"PLAYER_REGEN_ENABLED")
+retryFrame.scripts.OnUpdate(retryFrame,300)
+for i=1,6 do held[i] = retryCalls[i]; retryOutcomes[i] = "saved" end
+InCombatLockdown = savedCombat
+retryFrame.scripts.OnUpdate(retryFrame,0.4)
+for i=1,6 do expectEqual(retryCalls[i],held[i]+1,retryKeys[i] .. " survives failed regen and periodic guard") end
+
+-- A periodic attempt cannot discard same-second work before a later second.
+for i=1,6 do retryOutcomes[i] = "same-second" end
+now=now+1
+retryFrame.scripts.OnUpdate(retryFrame,300)
+for i=1,6 do held[i] = retryCalls[i]; retryOutcomes[i] = "saved" end
+now=now+1
+retryFrame.scripts.OnUpdate(retryFrame,0.4)
+for i=1,6 do expectEqual(retryCalls[i],held[i]+1,retryKeys[i] .. " periodic same-second survives silence") end
+
+for i=1,6 do retryOutcomes[i] = function() return nil, "Money API unavailable. private player payload" end end
+retryFrame.scripts.OnEvent(retryFrame,"PLAYER_REGEN_ENABLED")
+for i=1,6 do held[i] = retryCalls[i] end
+retryFrame.scripts.OnUpdate(retryFrame,0.35)
+for i=1,6 do expectEqual(retryCalls[i],held[i]+1,retryKeys[i] .. " transient unavailable retries once") end
+for i=1,6 do held[i] = retryCalls[i] end
+retryFrame.scripts.OnUpdate(retryFrame,0.35)
+for i=1,6 do expectEqual(retryCalls[i],held[i],retryKeys[i] .. " unavailable result backs off") end
+for i=1,6 do retryOutcomes[i] = "same-second" end
+retryFrame.scripts.OnUpdate(retryFrame,0.7)
+for i=1,6 do expectEqual(retryCalls[i],held[i]+1,retryKeys[i] .. " backed-off work remains pending") end
+
+local protected = protectedSentinel()
+secretValues[protected] = true
+now = now + 1
+for _, case in ipairs({
+    {"unexpected-success", "unknown status"},
+    {function() return true, protected end, "protected status"},
+    {function() return protected, protected end, "protected stored"},
+    {function() return nil, "Money API unavailable. private player payload" end, "unavailable error"},
+}) do
+    for i=1,6 do retryOutcomes[i] = case[1] end
+    retryFrame.scripts.OnEvent(retryFrame,"PLAYER_REGEN_ENABLED")
+    for i=1,6 do
+        expectTrue(retryStatus((i == 4 and "Currencies" or i == 6 and "Titles" or retryNames[i]) ..
+            ": Capture unavailable"), retryKeys[i] .. " auto " .. case[2] .. " classified safely")
+    end
+end
+expectEqual(retryStatus("private player payload"),false,"automatic errors never expose private payload")
+
+for i=1,6 do retryOutcomes[i] = "same-second" end
+retryFrame.scripts.OnEvent(retryFrame,"PLAYER_REGEN_ENABLED")
+for i=1,6 do retryEnabled[i] = false; held[i] = retryCalls[i]; retryOutcomes[i] = "saved" end
+now=now+1
+retryFrame.scripts.OnUpdate(retryFrame,0.4)
+for i=1,6 do expectEqual(retryCalls[i],held[i],retryKeys[i] .. " opt-out cancels pending retry") end
+for i=1,6 do retryEnabled[i] = true end
+retryFrame.scripts.OnUpdate(retryFrame,0.4)
+for i=1,6 do expectEqual(retryCalls[i],held[i],retryKeys[i] .. " opt-out does not resume stale work") end
+for i=1,6 do retryOutcomes[i] = "refused" end
+retryFrame.scripts.OnEvent(retryFrame,"PLAYER_REGEN_ENABLED")
+for i=1,6 do held[i] = retryCalls[i]; retryOutcomes[i] = "saved" end
+retryFrame.scripts.OnUpdate(retryFrame,0.4)
+for i=1,6 do expectEqual(retryCalls[i],held[i],retryKeys[i] .. " explicit refusal clears pending") end
+for i=1,6 do retryEnabled[i] = false end
+
+-- Manual still works with auto disabled. Unknown, unavailable and protected
+-- writer results must never be reported as same-second or leak error payload.
+for i=1,6 do
+    local button = retryButtons[(i == 4 and "Currencies" or i == 6 and "Titles" or retryNames[i]) .. " now"]
+    retryOutcomes[i] = "unchanged"
+    button.scripts.OnClick(button)
+    expectTrue(retryStatus((i == 4 and "Currencies" or i == 6 and "Titles" or retryNames[i]) .. ": Scanned; unchanged"),
+        retryKeys[i] .. " manual action ignores auto opt-out")
+    retryOutcomes[i] = function() return nil, "Money API unavailable. private player payload" end
+    button.scripts.OnClick(button)
+    expectTrue(retryStatus((i == 4 and "Currencies" or i == 6 and "Titles" or retryNames[i]) .. ": Capture unavailable"),
+        retryKeys[i] .. " unavailable writer result classified safely")
+    retryOutcomes[i] = function() return true, protected end
+    expectTrue(pcall(button.scripts.OnClick,button),retryKeys[i] .. " protected status safe")
+    expectTrue(retryStatus((i == 4 and "Currencies" or i == 6 and "Titles" or retryNames[i]) .. ": Capture unavailable"),
+        retryKeys[i] .. " protected status unavailable")
+    retryOutcomes[i] = "unexpected-success"
+    button.scripts.OnClick(button)
+    expectTrue(retryStatus((i == 4 and "Currencies" or i == 6 and "Titles" or retryNames[i]) .. ": Capture unavailable"),
+        retryKeys[i] .. " unknown success status unavailable")
+    retryOutcomes[i] = function() return protected, protected end
+    expectTrue(pcall(button.scripts.OnClick,button),retryKeys[i] .. " protected stored safe")
+    expectTrue(retryStatus((i == 4 and "Currencies" or i == 6 and "Titles" or retryNames[i]) .. ": Capture unavailable"),
+        retryKeys[i] .. " protected stored unavailable")
+end
+expectEqual(retryStatus("private player payload"),false,"private writer payload never displayed")
+for i,name in ipairs(retryNames) do
+    local captureName, enabledName = "MclarionWow_Capture" .. name,
+        "MclarionWow_" .. (i == 1 and "Quest" or name) .. "AutoEnabled"
+    _G[captureName],_G[enabledName] = retryOriginal[i][1],retryOriginal[i][2]
+end
+secretValues[protected] = nil
+end)()
 
 if failures > 0 then
     io.stderr:write(string.format("\n%d/%d assertions failed\n", failures, tests))

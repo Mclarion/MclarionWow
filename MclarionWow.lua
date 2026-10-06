@@ -1662,6 +1662,75 @@ end
 
 local settingsWindow, characterStatusLabel, combatStatusLabel, bagStatusLabel, bankStatusLabel, itemStatusLabel, questStatusLabel, reputationStatusLabel
 local goldStatusLabel, currencyStatusLabel, honorStatusLabel, titleStatusLabel
+local questDetailLabel, reputationDetailLabel, goldDetailLabel, currencyDetailLabel, honorDetailLabel, titleDetailLabel
+local lastSuccessfulCapture = {} -- session-only; WoW, not Lua, controls disk persistence
+local companionCategories = {
+    {"quest", "MclarionWow_CaptureQuests", "MclarionWow_QuestAutoEnabled"},
+    {"reputation", "MclarionWow_CaptureReputation", "MclarionWow_ReputationAutoEnabled"},
+    {"gold", "MclarionWow_CaptureGold", "MclarionWow_GoldAutoEnabled"},
+    {"currency", "MclarionWow_CaptureCurrency", "MclarionWow_CurrencyAutoEnabled"},
+    {"honor", "MclarionWow_CaptureHonor", "MclarionWow_HonorAutoEnabled"},
+    {"title", "MclarionWow_CaptureTitle", "MclarionWow_TitleAutoEnabled"},
+}
+local function companionState(index, message, statusLabel, detailLabel, label)
+    if not statusLabel then return end
+    local entry = companionCategories[index]
+    local capture, enabled = _G[entry[2]], _G[entry[3]]
+    local available = not isSecret(capture) and type(capture) == "function"
+    local active = false
+    if available and not isSecret(enabled) and type(enabled) == "function" then
+        local ok, result = pcall(enabled)
+        active = ok and not isSecret(result) and result == true
+    end
+    statusLabel:SetText(label .. ": " .. (available and message or
+        "Companion addon unavailable; enable Progression."))
+    if detailLabel then
+        detailLabel:SetText("Auto: " .. (active and "on" or "off") ..
+            " | Last success (memory, this session): " ..
+            (lastSuccessfulCapture[entry[1]] or "none"))
+    end
+end
+-- Writer errors may contain private client data: classify only, never display them.
+local function classifyCompanionResult(ok, stored, result)
+    if isSecret(stored) or isSecret(result) then return "unavailable" end
+    if not ok then return "unavailable" end
+    if stored == true then
+        if result == "saved" then return "captured" end
+        if result == "unchanged" then return "unchanged" end
+        if result == "same-second" then return "same-second" end
+        return "unavailable"
+    end
+    if stored == nil and type(result) == "string" and
+        result:find("unavailable", 1, true) then return "unavailable" end
+    if stored == false or stored == nil then return "refused" end
+    return "unavailable"
+end
+local function companionMessage(outcome, automatic)
+    if outcome == "captured" then return "Scanned; captured in memory (not on disk)." end
+    if outcome == "unchanged" then return "Scanned; unchanged." end
+    if outcome == "same-second" then return "Changed state waits for a later server second." end
+    if outcome == "refused" then return automatic and
+        "Automatic scan refused; previous observations preserved." or
+        "Capture refused; prior observations preserved." end
+    return "Capture unavailable; previous observations preserved."
+end
+local function noteCompanionResult(key, status)
+    if status ~= "saved" then return end
+    local clock = GetServerTime
+    if isSecret(clock) or type(clock) ~= "function" then return end
+    local ok, stamp = pcall(clock)
+    if ok and not isSecret(stamp) and positiveInteger(stamp) then
+        -- Display only a timestamp; never infer that the game flushed a file.
+        local formatter = date
+        local formatted, text = false, nil
+        if not isSecret(formatter) and type(formatter) == "function" then
+            formatted, text = pcall(formatter, "!%Y-%m-%d %H:%M:%S UTC", stamp)
+        end
+        lastSuccessfulCapture[key] = formatted and not isSecret(text) and
+            type(text) == "string" and #text <= 32 and text or
+            (tostring(stamp) .. " server seconds")
+    end
+end
 local goldMessage = "No money observation this session."
 local currencyMessage = "No visible currency observation this session."
 local honorMessage = "No supported PvP observation this session."
@@ -1682,22 +1751,12 @@ local function refreshSettingsStatus()
     if bagStatusLabel then bagStatusLabel:SetText("Bags: " .. bagMessage) end
     if bankStatusLabel then bankStatusLabel:SetText("Bank: " .. bankMessage) end
     if itemStatusLabel then itemStatusLabel:SetText("Items: " .. itemMessage) end
-    if questStatusLabel then
-        questStatusLabel:SetText("Quests: " .. (type(MclarionWow_CaptureQuests) == "function" and
-            questMessage or "Companion addon unavailable; install/enable MclarionWowProgression."))
-    end
-    if reputationStatusLabel then
-        reputationStatusLabel:SetText("Reputation: " .. (type(MclarionWow_CaptureReputation) == "function" and
-            reputationMessage or "Companion addon unavailable; install/enable MclarionWowProgression."))
-    end
-    if goldStatusLabel then goldStatusLabel:SetText("Gold: " .. (type(MclarionWow_CaptureGold) == "function" and
-        goldMessage or "Companion addon unavailable; install/enable MclarionWowProgression.")) end
-    if currencyStatusLabel then currencyStatusLabel:SetText("Currencies: " .. (type(MclarionWow_CaptureCurrency) == "function" and
-        currencyMessage or "Companion addon unavailable; install/enable MclarionWowProgression.")) end
-    if honorStatusLabel then honorStatusLabel:SetText("Honor: " .. (type(MclarionWow_CaptureHonor) == "function" and
-        honorMessage or "Companion addon unavailable; install/enable MclarionWowProgression.")) end
-    if titleStatusLabel then titleStatusLabel:SetText("Titles: " .. (type(MclarionWow_CaptureTitle) == "function" and
-        titleMessage or "Companion addon unavailable; install/enable MclarionWowProgression.")) end
+    companionState(1, questMessage, questStatusLabel, questDetailLabel, "Quests")
+    companionState(2, reputationMessage, reputationStatusLabel, reputationDetailLabel, "Reputation")
+    companionState(3, goldMessage, goldStatusLabel, goldDetailLabel, "Gold")
+    companionState(4, currencyMessage, currencyStatusLabel, currencyDetailLabel, "Currencies")
+    companionState(5, honorMessage, honorStatusLabel, honorDetailLabel, "Honor")
+    companionState(6, titleMessage, titleStatusLabel, titleDetailLabel, "Titles")
 end
 
 local function reportLoggingAfterOptOut()
@@ -1871,14 +1930,18 @@ local function createSettingsWindow()
     itemStatusLabel:SetPoint("TOPLEFT", 18, -392)
     questStatusLabel = legacyText(nil, "OVERLAY", "GameFontHighlight")
     questStatusLabel:SetPoint("TOPLEFT", 18, -414)
+    questDetailLabel = legacyText(nil, "OVERLAY", "GameFontHighlight")
+    questDetailLabel:SetPoint("TOPLEFT", 18, -433)
     reputationStatusLabel = legacyText(nil, "OVERLAY", "GameFontHighlight")
-    reputationStatusLabel:SetPoint("TOPLEFT", 18, -436)
+    reputationStatusLabel:SetPoint("TOPLEFT", 18, -455)
+    reputationDetailLabel = legacyText(nil, "OVERLAY", "GameFontHighlight")
+    reputationDetailLabel:SetPoint("TOPLEFT", 18, -474)
     refreshSettingsStatus()
     for index, entry in ipairs({ { "Character now", "character" }, { "Bags now", "bags" },
         { "Bank now", "bank" }, { "Items now", "items" } }) do
         local button = legacyFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
         button:SetSize(110, 25)
-        button:SetPoint("TOPLEFT", 18 + (index - 1) * 117, -464)
+        button:SetPoint("TOPLEFT", 18 + (index - 1) * 117, -490)
         button:SetText(entry[1])
         button:SetScript("OnClick", function()
             if not captureNow then return end
@@ -1895,7 +1958,7 @@ local function createSettingsWindow()
     end
     local questsNow = legacyFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
     questsNow:SetSize(110, 25)
-    questsNow:SetPoint("TOPLEFT", 18, -496)
+    questsNow:SetPoint("TOPLEFT", 18, -521)
     questsNow:SetText("Quests now")
     questsNow:SetScript("OnClick", function()
         if not inWorld then
@@ -1904,19 +1967,15 @@ local function createSettingsWindow()
             questMessage = "Companion addon unavailable; install/enable MclarionWowProgression."
         else
             local ok, stored, result = pcall(MclarionWow_CaptureQuests, true)
-            if not ok or stored ~= true then
-                questMessage = "Capture refused; prior observations preserved."
-            elseif result == "saved" then
-                questMessage = "Scanned; held in memory until WoW saves."
-            elseif result == "unchanged" then
-                questMessage = "Scanned; unchanged."
-            else questMessage = "Changed state waits for a later server second." end
+            local outcome = classifyCompanionResult(ok, stored, result)
+            if outcome == "captured" then noteCompanionResult("quest", "saved") end
+            questMessage = companionMessage(outcome, false)
         end
         refreshSettingsStatus()
     end)
     local reputationNow = legacyFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
     reputationNow:SetSize(125, 25)
-    reputationNow:SetPoint("TOPLEFT", 140, -496)
+    reputationNow:SetPoint("TOPLEFT", 140, -521)
     reputationNow:SetText("Reputation now")
     reputationNow:SetScript("OnClick", function()
         if not inWorld then
@@ -1925,19 +1984,15 @@ local function createSettingsWindow()
             reputationMessage = "Companion addon unavailable; install/enable MclarionWowProgression."
         else
             local ok, stored, result = pcall(MclarionWow_CaptureReputation, true)
-            if not ok or stored ~= true then
-                reputationMessage = "Capture refused; prior observations preserved."
-            elseif result == "saved" then
-                reputationMessage = "Scanned; held in memory until WoW saves."
-            elseif result == "unchanged" then
-                reputationMessage = "Scanned; unchanged."
-            else reputationMessage = "Changed state waits for a later server second." end
+            local outcome = classifyCompanionResult(ok, stored, result)
+            if outcome == "captured" then noteCompanionResult("reputation", "saved") end
+            reputationMessage = companionMessage(outcome, false)
         end
         refreshSettingsStatus()
     end)
     local stopButton = legacyFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
     stopButton:SetSize(175, 25)
-    stopButton:SetPoint("TOPLEFT", 18, -530)
+    stopButton:SetPoint("TOPLEFT", 18, -553)
     stopButton:SetText("Stop logging now")
     stopButton:SetScript("OnClick", function()
         local current = settingsRoot()
@@ -1951,10 +2006,10 @@ local function createSettingsWindow()
         stopLoggingNow()
     end)
     local footer = legacyText(nil, "OVERLAY", "GameFontNormal")
-    footer:SetPoint("TOPLEFT", 18, -567)
+    footer:SetPoint("TOPLEFT", 18, -583)
     footer:SetText("Stop logging now may end logging started outside this addon.")
     local saveNote = legacyText(nil, "OVERLAY", "GameFontNormal")
-    saveNote:SetPoint("TOPLEFT", 18, -589)
+    saveNote:SetPoint("TOPLEFT", 18, -605)
     saveNote:SetText("Items now: bags + gear; Bank now: bank items if enabled.")
 
     local categories = {
@@ -1982,7 +2037,7 @@ local function createSettingsWindow()
         local fn = _G[entry.enabled]
         if type(fn) ~= "function" or isSecret(fn) then return false end
         local ok, value = pcall(fn)
-        return ok and value == true
+        return ok and not isSecret(value) and value == true
     end
     local heading = companion(settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge"))
     heading:SetPoint("TOPLEFT", 18, -48)
@@ -2011,7 +2066,7 @@ local function createSettingsWindow()
                 setMessage(index, "Setting refused; previous preference preserved.")
             else
                 setMessage(index, self:GetChecked() and
-                    "Automatic capture enabled; held until WoW saves." or
+                    "Automatic capture enabled; waiting for observation." or
                     "Automatic capture off; manual capture remains available.")
             end
         end)
@@ -2019,16 +2074,24 @@ local function createSettingsWindow()
     local statusLabels = {}
     for index = 1, 4 do
         local label = companion(settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight"))
-        label:SetPoint("TOPLEFT", 18, -314 - (index - 1) * 27)
+        label:SetPoint("TOPLEFT", 18, -300 - (index - 1) * 47)
         statusLabels[index] = label
     end
     goldStatusLabel, currencyStatusLabel, honorStatusLabel, titleStatusLabel =
         statusLabels[1], statusLabels[2], statusLabels[3], statusLabels[4]
+    local detailLabels = {}
+    for index = 1, 4 do
+        local label = companion(settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontHighlight"))
+        label:SetPoint("TOPLEFT", 18, -320 - (index - 1) * 47)
+        detailLabels[index] = label
+    end
+    goldDetailLabel, currencyDetailLabel, honorDetailLabel, titleDetailLabel =
+        detailLabels[1], detailLabels[2], detailLabels[3], detailLabels[4]
     for index, entry in ipairs(categories) do
         local button = companion(CreateFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate"))
         button:SetSize(142, 27)
         button:SetPoint("TOPLEFT", 18 + ((index - 1) % 2) * 158,
-            -444 - math.floor((index - 1) / 2) * 38)
+            -504 - math.floor((index - 1) / 2) * 38)
         button:SetText(entry.label .. " now")
         button:SetScript("OnClick", function()
             local fn = _G[entry.capture]
@@ -2037,21 +2100,17 @@ local function createSettingsWindow()
                 setMessage(index, "Companion addon unavailable; install/enable MclarionWowProgression.")
             else
                 local ok, stored, result = pcall(fn, true)
-                if not ok or stored ~= true then
-                    setMessage(index, "Capture refused; previous observations preserved.")
-                elseif result == "saved" then
-                    setMessage(index, "Scanned; held in memory until WoW saves.")
-                elseif result == "unchanged" then
-                    setMessage(index, "Scanned; unchanged.")
-                else
-                    setMessage(index, "Changed state waits for a later server second.")
+                local outcome = classifyCompanionResult(ok, stored, result)
+                if outcome == "captured" then
+                    noteCompanionResult(({"gold", "currency", "honor", "title"})[index], "saved")
                 end
+                setMessage(index, companionMessage(outcome, false))
             end
         end)
     end
     local reminder = companion(settingsWindow:CreateFontString(nil, "OVERLAY", "GameFontNormal"))
-    reminder:SetPoint("TOPLEFT", 18, -548)
-    reminder:SetText("Manual scans need no auto opt-in; /reload or exit flushes saves.")
+    reminder:SetPoint("TOPLEFT", 18, -593)
+    reminder:SetText("Manual scans need no auto opt-in; WoW flushes on /reload or exit.")
     local legacyTab = CreateFrame("Button", nil, settingsWindow, "UIPanelButtonTemplate")
     legacyTab:SetSize(98, 24)
     legacyTab:SetPoint("TOPRIGHT", -125, -8)
@@ -2149,62 +2208,76 @@ end
 
 local captureFrame = CreateFrame("Frame")
 local elapsed = 0
-local function captureQuestsAutomatically()
-    if not inWorld or type(MclarionWow_QuestAutoEnabled) ~= "function" or
-        not MclarionWow_QuestAutoEnabled() then return end
-    local ok, captured, result = pcall(MclarionWow_CaptureQuests, false)
-    if not ok or captured ~= true then
-        questMessage = "Automatic scan refused; prior observations preserved."
-    elseif result == "saved" then questMessage = "Scanned; held in memory until WoW saves."
-    elseif result == "unchanged" then questMessage = "Scanned; unchanged."
-    else questMessage = "Changed state waits for a later server second." end
-    refreshSettingsStatus()
+local pendingEventCaptures = {} -- six bounded category slots; never stores event payloads
+local function serverSecond()
+    local clock = GetServerTime
+    if isSecret(clock) or type(clock) ~= "function" then return nil end
+    local ok, value = pcall(clock)
+    if ok and not isSecret(value) and positiveInteger(value) then return value end
 end
-local function captureReputationAutomatically()
-    if not inWorld or type(MclarionWow_ReputationAutoEnabled) ~= "function" or
-        not MclarionWow_ReputationAutoEnabled() or
-        type(MclarionWow_CaptureReputation) ~= "function" then return end
-    local ok, captured, result = pcall(MclarionWow_CaptureReputation, false)
-    if not ok or captured ~= true then
-        reputationMessage = "Automatic scan refused; prior observations preserved."
-    elseif result == "saved" then reputationMessage = "Scanned; held in memory until WoW saves."
-    elseif result == "unchanged" then reputationMessage = "Scanned; unchanged."
-    else reputationMessage = "Changed state waits for a later server second." end
-    refreshSettingsStatus()
+local function deferUnavailable(pending)
+    if not pending then return end
+    pending.second = nil
+    pending.failures = math.min((pending.failures or 0) + 1, 11)
+    pending.delay = math.min(300, 0.35 * 2 ^ (pending.failures - 1))
+    pending.age = 0
 end
-local function captureCompanionsAutomatically()
+local function autoCapture(index)
     if not inWorld then return end
-    local categories = {
-        {MclarionWow_GoldAutoEnabled, MclarionWow_CaptureGold},
-        {MclarionWow_CurrencyAutoEnabled, MclarionWow_CaptureCurrency},
-        {MclarionWow_HonorAutoEnabled, MclarionWow_CaptureHonor},
-        {MclarionWow_TitleAutoEnabled, MclarionWow_CaptureTitle},
-    }
-    for index, category in ipairs(categories) do
-        local enabled, capture = category[1], category[2]
-        if not isSecret(enabled) and type(enabled) == "function" and
-            not isSecret(capture) and type(capture) == "function" then
-            local checked, active = pcall(enabled)
-            if checked and active == true then
-                local ok, stored, status = pcall(capture, false)
-                local message
-                if not ok or stored ~= true then
-                    message = "Automatic scan refused; previous observations preserved."
-                elseif status == "saved" then
-                    message = "Scanned; held in memory until WoW saves."
-                elseif status == "unchanged" then
-                    message = "Scanned; unchanged."
-                else
-                    message = "Changed state waits for a later server second."
-                end
-                if index == 1 then goldMessage = message
-                elseif index == 2 then currencyMessage = message
-                elseif index == 3 then honorMessage = message
-                else titleMessage = message end
-            end
+    local entry = companionCategories[index]
+    local enabled, capture = _G[entry[3]], _G[entry[2]]
+    local pending = pendingEventCaptures[index]
+    if isSecret(enabled) or type(enabled) ~= "function" then
+        deferUnavailable(pending)
+        return
+    end
+    local checked, active = pcall(enabled)
+    if checked and not isSecret(active) and active == false then
+        pendingEventCaptures[index] = nil
+        return
+    end
+    if not checked or isSecret(active) or active ~= true then
+        deferUnavailable(pending)
+        return
+    end
+    if pending and pending.second and pending.second == serverSecond() then return end
+    if not pending then
+        pending = {age=0}
+        pendingEventCaptures[index] = pending
+    end
+    if combatStatus() ~= false or isSecret(capture) or type(capture) ~= "function" then
+        deferUnavailable(pending)
+        return
+    end
+    local ok, stored, result = pcall(capture, false)
+    local outcome = classifyCompanionResult(ok, stored, result)
+    if outcome == "captured" then noteCompanionResult(entry[1], "saved") end
+    local message = companionMessage(outcome, true)
+    if index == 1 then questMessage = message
+    elseif index == 2 then reputationMessage = message
+    elseif index == 3 then goldMessage = message
+    elseif index == 4 then currencyMessage = message
+    elseif index == 5 then honorMessage = message
+    else titleMessage = message end
+    if outcome == "captured" or outcome == "unchanged" or outcome == "refused" then
+        pendingEventCaptures[index] = nil
+    else
+        pending.second = outcome == "same-second" and serverSecond() or nil
+        if outcome == "same-second" and pending.second then
+            pending.failures, pending.delay = 0, 0.35
+        else
+            deferUnavailable(pending)
         end
     end
     refreshSettingsStatus()
+end
+local function queueCapture(index)
+    if not pendingEventCaptures[index] then pendingEventCaptures[index] = {age=0} end
+end
+local function captureQuestsAutomatically() autoCapture(1) end
+local function captureReputationAutomatically() autoCapture(2) end
+local function captureCompanionsAutomatically()
+    for index = 3, 6 do autoCapture(index) end
 end
 local function enableCombatLogging()
     local settings, err = settingsRoot()
@@ -2409,19 +2482,50 @@ for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "PLAYER_EQUIPMENT_CHANGED",
     "QUEST_LOG_UPDATE", "UPDATE_FACTION" }) do
     captureFrame:RegisterEvent(event)
 end
+-- Forever 1.60.1.70205 source: CurrencyInfoDocumentation.lua:593-604,
+-- :635-639 and Camelot/CharacterFrame.lua:135-142. These are optional on
+-- another build; failed registrations leave world/post-combat/timer retries.
+for _, event in ipairs({"PLAYER_MONEY", "CURRENCY_DISPLAY_UPDATE",
+    "PLAYER_PVP_RANK_CHANGED"}) do
+    pcall(captureFrame.RegisterEvent, captureFrame, event)
+end
 local function onEvent(_, event, bagID)
+    if isSecret(event) then return end
     if event == "PLAYER_ENTERING_WORLD" then
         inWorld = true
         enableCombatLogging()
     end
     if event == "PLAYER_ENTERING_WORLD" or event == "QUEST_LOG_UPDATE" or
-        event == "PLAYER_REGEN_ENABLED" then pcall(captureQuestsAutomatically) end
+        event == "PLAYER_REGEN_ENABLED" then
+        queueCapture(1)
+        pcall(captureQuestsAutomatically)
+    end
     if event == "PLAYER_ENTERING_WORLD" or event == "UPDATE_FACTION" or
-        event == "PLAYER_REGEN_ENABLED" then pcall(captureReputationAutomatically) end
+        event == "PLAYER_REGEN_ENABLED" then
+        queueCapture(2)
+        pcall(captureReputationAutomatically)
+    end
     if event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_REGEN_ENABLED" then
+        for index = 3, 6 do queueCapture(index) end
         pcall(captureCompanionsAutomatically)
     end
-    if event ~= "QUEST_LOG_UPDATE" and event ~= "UPDATE_FACTION" and
+    if inWorld then
+        local index = event == "PLAYER_MONEY" and 3 or
+            event == "CURRENCY_DISPLAY_UPDATE" and 4 or
+            event == "PLAYER_PVP_RANK_CHANGED" and 5
+        if index then
+            local enabled = _G[companionCategories[index][3]]
+            if not isSecret(enabled) and type(enabled) == "function" then
+                local ok, active = pcall(enabled)
+                if ok and not isSecret(active) and active == true then
+                    queueCapture(index)
+                end
+            end
+        end
+    end
+    if event ~= "PLAYER_MONEY" and event ~= "CURRENCY_DISPLAY_UPDATE" and
+        event ~= "PLAYER_PVP_RANK_CHANGED" and
+        event ~= "QUEST_LOG_UPDATE" and event ~= "UPDATE_FACTION" and
         event ~= "BAG_UPDATE_DELAYED" and event ~= "BAG_OPEN" and
         event ~= "BANKFRAME_OPENED" and event ~= "PLAYERBANKSLOTS_CHANGED" and
         event ~= "BANK_TABS_CHANGED" then pcall(captureLocally) end
@@ -2455,15 +2559,34 @@ if not isSecret(EventRegistry) and type(EventRegistry) == "table" and
         end, captureFrame)
 end
 local function onUpdate(_, delta)
+    if isSecret(delta) or type(delta) ~= "number" or delta < 0 or
+        delta ~= delta or delta == math.huge then return end
     elapsed = elapsed + delta
     if elapsed >= 300 then
         elapsed = 0
         pcall(captureLocally)
         pcall(captureBagsLocally)
         pcall(captureItemDetailsLocally, "bags")
-        pcall(captureQuestsAutomatically)
-        pcall(captureReputationAutomatically)
-        pcall(captureCompanionsAutomatically)
+        for index = 1, 6 do
+            queueCapture(index)
+            local pending = pendingEventCaptures[index]
+            pending.failures, pending.delay = 0, 0.35
+            pcall(autoCapture, index)
+        end
+    else
+        for index = 1, 6 do
+            local pending = pendingEventCaptures[index]
+            if pending then
+                -- First-event debounce and bounded exponential backoff for
+                -- unavailable guards/results; no writer hot loop per frame.
+                local delay = pending.delay or 0.35
+                pending.age = math.min(pending.age + delta, delay)
+                if pending.age >= delay then
+                    pending.age = 0
+                    pcall(autoCapture, index)
+                end
+            end
+        end
     end
 end
 captureFrame:SetScript("OnUpdate", function(...) pcall(onUpdate, ...) end)

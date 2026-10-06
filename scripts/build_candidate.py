@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and validate the offline two-addon 0.12.0 candidate ZIP.
+"""Build and validate the offline two-addon 0.12.1 candidate ZIP.
 
 No player files, network, installation or consumer edits.
 """
