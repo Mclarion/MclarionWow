@@ -4,7 +4,8 @@
 
 - [x] Combine all six categories in the two-addon package; fix the two honor/title review blockers and rebuild verified source-matched archive.
 - [x] Published runtime `4de45204b003d5062a39857566171e325a235a4d` and anonymously verified all runtime bytes; installed both 0.12.0-candidate addon folders with WoW stopped. Separate readback verified seven file hashes, four enabled state files, both versions and the exact 0.11.11 rollback copy. Synthetic paired installer passed refusal, rollback and success scenarios. No player-save reads/writes.
-- [ ] Complete one in-game capture/normal-exit test using `IN_GAME_CHECK.md`; no repeated migration diagnostic. Live persistence and later-restart survival remain unverified.
+- [x] Combined capture/normal-exit test on 1.60.1.70235, 6 October 2026: player reported unchanged quest capture, other categories held in memory, no errors. Stopped-game aggregate-only parsing confirmed all four companion roots and build-70235 observations for all six categories (currency character/account scopes separate); companion 1,661 bytes, legacy single-root 67,632 bytes. No raw data exported. Normal-exit disk persistence confirmed, not full payload semantics or later restart.
+- [ ] On the next naturally occurring login, confirm reload/continued capture; no extra diagnostic-only login requested. Companion-file consumer import remains unsupported and outside current addon-only scope.
 
 ## Unreleased six-category companion candidate
 
