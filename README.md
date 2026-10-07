@@ -1,12 +1,16 @@
 # MclarionWow
 
-## Offline 0.12.4 detail reader scope — not installed (7 October 2026)
+## Current installation — 0.12.4-candidate (7 October 2026)
 
-`DashboardDetails.lua` adds a standalone read-only `MclarionWow_DashboardDetails(key)` for the existing eleven dashboard keys. It renders the **latest validated saved observation**, with retained history count separate, labels and source scope rather than raw wire/Lua. A 32,768-byte output cap ends with an explicit truncation notice; this is not pagination or a promise every row will fit. It never triggers a scan, changes settings, writes SavedVariables, or imports companion data. The UI, TOC and package integration belong to the separate UI workstream; this module alone is not loaded by the installed addon. See `DATA_STORAGE.md` for the full field inventory and precise limits. The latest player screenshot establishes that installed 0.12.3 rendered a window, **not** that every category captured complete data, that the proposed details UI is installed, or that the display changes capture coverage.
+Installed with WoW stopped on executable 1.60.1.70245. Public runtime `9d84fc9e5b3ae9c80ac9de6d0f2eccd7803f0da1` matched all ten packaged files; separate installed readback verified both versions, ten hashes, four unchanged enabled-state files and both retained 0.12.3 rollback folders. ZIP SHA-256 `e2634c2db85fd482364852caa7d728e378b156044beeec85f7d1e225c94dfe18`. UI/details/main tests pass on Lua5.1/5.4 (658 main assertions), two package tests and Windows paired rollback tests passed. No player saves inspected. Actual 0.12.4 rendering awaits the next normal session.
+
+The map-sized overview keeps eleven categories visible at the tested ordinary viewport, with aligned preferences, statuses, stored summaries and ten **Scan** buttons. Combat logging has no Scan or Stop action. Selected saved values scroll independently of the overview; smaller viewports have overflow controls. Opening and navigating never scan or change opt-ins.
+
+`DashboardDetails.lua` adds a standalone read-only `MclarionWow_DashboardDetails(key)` for the existing eleven dashboard keys. It renders the **latest validated saved observation**, with retained history count separate, labels and source scope rather than raw wire/Lua. A 32,768-byte output cap ends with an explicit truncation notice; this is not pagination or a promise every row will fit. It never triggers a scan, changes settings, writes SavedVariables, or imports companion data. The reader is included in both the published package and the verified installation. See `DATA_STORAGE.md` for the full field inventory and precise limits. The latest player screenshot establishes that installed 0.12.3 rendered a window, **not** that every category captured complete data, that the proposed details UI is installed, or that the display changes capture coverage.
 
 A requested companion **Download** button to `localhost` is **UNDER DEVELOPMENT** documentation-only placeholder; no endpoint, button, listener or file transfer exists in this scope. No in-game link is added pending policy clarification: the official UI Add-On Development Policy §4 prohibits in-game advertisements for goods or services and does not expressly authorize this companion link.
 
-## Current installation — 0.12.3-candidate hotfix (7 October 2026)
+## Historical 0.12.3 hotfix — superseded by 0.12.4
 
 **Installed and separately verified:** public runtime `492f604cd3bf3f8af1818771418cf4b5cf7b1ff5`, all nine installed/public file hashes, both addon versions, four unchanged enabled-state files and both previous 0.12.2 folders in rollback storage. WoW was stopped; executable 1.60.1.70245 was verified. ZIP SHA-256 `89204d669fa5b3053f80704fb4bff4c86cad71b1497fc508467c5f6381fd4305`. No player SavedVariables were read or changed.
 
