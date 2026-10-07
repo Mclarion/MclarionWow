@@ -1,10 +1,12 @@
 # MclarionWow: current SavedVariables handoff
 
-## Offline 0.12.3-candidate hotfix — not installed (7 October 2026)
+## Current installation — 0.12.3-candidate hotfix (7 October 2026)
 
-Installed 0.12.2-candidate crashed when the player opened `/mhwowui` on client 1.60.1.70245: dashboard detail sizing read mock-only `footer.height`. The offline 0.12.3 candidate uses the WoW font-string `GetHeight()` method; test geometry now hides public width/height fields. This is a UI-only fix. Both addon TOCs identify the candidate, but installed code remains 0.12.2; legacy schema 1/2, companion roots, opt-ins, flush boundaries and import limitations below are unchanged. No player save was read or edited, and no live success is claimed.
+Public runtime `492f604cd3bf3f8af1818771418cf4b5cf7b1ff5` was anonymously verified against the nine-file package and installed with WoW stopped on executable 1.60.1.70245. Separate readback verified all nine installed hashes, both versions, four unchanged enabled-state files and both previous 0.12.2 addon folders retained outside AddOns. ZIP SHA-256 `89204d669fa5b3053f80704fb4bff4c86cad71b1497fc508467c5f6381fd4305`.
 
-## Current installation — 0.12.2-candidate, 7 October 2026
+The UI-only hotfix replaces mock-only `footer.height` with `footer:GetHeight()`. Private test geometry reproduces the original crash; UI116/integration657 assertions passed on each Lua5.1/5.4, broader synthetic tests and two package tests passed. Legacy schema 1/2, companion roots, opt-ins, flush boundaries and import limitations remain unchanged. No player save was read or edited. **Live initialization/rendering of 0.12.3 remains pending**, not established by installation hashes.
+
+## Historical 0.12.2 installation — superseded by 0.12.3
 
 **Installed 0.12.2-candidate:** Public runtime `a25bb711e9a67474a7137d4c16e00f7e0633207e` and all nine package files matched anonymously before installation. WoW was stopped on executable 1.60.1.70245. Separate installed readback verified nine hashes, both version headers, four unchanged enabled-state files and both prior 0.12.1 folders retained outside AddOns. ZIP SHA-256 `6c6705758365d40360b041567b82677abb9ae44aa36f9a813d20312a03da7f2f`. Earlier UI113/integration657 assertions passed on each Lua 5.1/5.4, but the player subsequently reported the live dashboard crash above. No player SavedVariables were inspected or modified; hotfix rendering is unverified.
 

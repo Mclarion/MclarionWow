@@ -1,10 +1,12 @@
 # MclarionWow
 
-## Offline 0.12.3-candidate hotfix — not installed or published (7 October 2026)
+## Current installation — 0.12.3-candidate hotfix (7 October 2026)
 
-The player reported a live `/mhwowui` crash on installed 0.12.2-candidate (client 1.60.1.70245): `DashboardUI.lua:130` calculated detail height from `footer.height`, a Lua mock field that WoW font strings do not expose. The 0.12.3 candidate calls `footer:GetHeight()` instead. Frame/font-string test geometry is now private and exposed only through methods; the exact nil-arithmetic error was reproduced before the fix. The eleven sections, scheduling, opt-ins, storage roots and consumers are unchanged. Offline mock tests and a source-matched two-addon ZIP are release preparation, **not** live UI validation or installation. Installed 0.12.2 remains the current runtime until a separately verified paired upgrade; no further player diagnostic is needed now.
+**Installed and separately verified:** public runtime `492f604cd3bf3f8af1818771418cf4b5cf7b1ff5`, all nine installed/public file hashes, both addon versions, four unchanged enabled-state files and both previous 0.12.2 folders in rollback storage. WoW was stopped; executable 1.60.1.70245 was verified. ZIP SHA-256 `89204d669fa5b3053f80704fb4bff4c86cad71b1497fc508467c5f6381fd4305`. No player SavedVariables were read or changed.
 
-## Current installation — 0.12.2-candidate, 7 October 2026
+The 0.12.2 dashboard crashed because `DashboardUI.lua:130` read mock-only `footer.height`. The hotfix calls `footer:GetHeight()`; private mock geometry reproduces the original nil-arithmetic failure and prevents the test from hiding it. UI116 and integration657 assertions pass on each Lua5.1/5.4, along with broader synthetic tests and two package tests. The eleven sections, scheduling, opt-ins and storage contracts are unchanged. **Next:** open `/mhwowui` during normal play to confirm initialization and rendering; this live check remains pending.
+
+## Historical 0.12.2 installation — superseded by 0.12.3
 
 **Installed 0.12.2-candidate:** Runtime `a25bb711e9a67474a7137d4c16e00f7e0633207e` was anonymously hash-verified and installed with WoW stopped on executable 1.60.1.70245. Separate readback matched all nine runtime files, both versions, four unchanged enabled-state files and both retained 0.12.1 addon folders. Reviewed ZIP SHA-256: `6c6705758365d40360b041567b82677abb9ae44aa36f9a813d20312a03da7f2f`. Its earlier mock UI tests passed 113 assertions and integration passed 657 on each Lua 5.1/5.4, but the player subsequently opened `/mhwowui` and reported the line-130 nil-height crash described above. No player SavedVariables were read or modified. Live rendering of the hotfix remains unverified.
 
