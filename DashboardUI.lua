@@ -1,257 +1,169 @@
--- Native, paged offline dashboard. No scanners are called by construction, refresh or navigation.
-local keys = {"character", "bags", "bank", "items", "combat", "quest", "reputation",
-    "gold", "currency", "honor", "title"}
-local names = {"Character", "Bags", "Character bank", "Item details", "Combat log",
-    "Quests", "Reputation", "Gold", "Currencies", "Honor", "Titles"}
-local scopes = {
-    "Own identity, gear, level and location. Does not track every past state.",
-    "Own carried-bag item totals, not account or guild storage.",
-    "Own character-bank tabs only while the character-bank view is open; no account bank.",
-    "Cached item names/details from own bags, gear and open character bank. Incomplete cache is refused.",
-    "WoW writes its combat-log file. This addon does not keep combat events or a record count.",
-    "Active quest-log view only; not completed quest history.",
-    "Visible faction list only; collapsed or unavailable rows are not inferred.",
-    "Current own money balance, not transaction history.",
-    "Visible currency list only; hidden currencies and acquisition history are not inferred.",
-    "Supported visible PvP counters only; not a full match history.",
-    "Selected/known title observation, not a title acquisition history.",
+-- Data-first offline dashboard. Opening, selecting and refreshing never scans.
+local keys={"combat","character","bags","bank","items","quest","reputation","gold","currency","honor","title"}
+local names={"Combat log","Character","Bags","Character bank","Item details","Quests","Reputation","Gold","Currencies","Honor","Titles"}
+local scopes={
+ "WoW writes its combat-log file. This addon keeps no combat events or record count.",
+ "Own identity, gear, level and location; not every past state.",
+ "Own carried-bag item totals; not account or guild storage.",
+ "Own character-bank tabs only while the own bank view is open; no account bank.",
+ "Cached names/details from own bags, gear and open own bank. Incomplete cache is refused.",
+ "Active quest-log view only; not completed quest history.",
+ "Visible faction list only; collapsed or unavailable rows are not inferred.",
+ "Current own money balance; not transaction history.",
+ "Visible currency list only; not hidden currencies or acquisition history.",
+ "Supported visible PvP counters only; not a full match history.",
+ "Selected/known title observation; not acquisition history.",
 }
-local triggers = {
-    "World entry; equipment, level, zone and post-combat events; every 5 minutes. Manual: Character now. Out of combat.",
-    "World entry, delayed bag update, own bag opening, post-combat; every 5 minutes. Manual: Bags now. Out of combat.",
-    "Bank frame open, bank slots/tabs changed, character bank page selection. Manual: Bank now. Only while own bank is open, out of combat.",
-    "World entry, equipment, bag updates/opening, post-combat; bank events/page selection for bank items; every 5 minutes for bags/gear. Manual: Items now (bags/gear), Bank now (bank details). Out of combat.",
-    "Auto-start at world entry if opted in. Manual: Stop logging now disables auto-start and requests WoW to stop; no file capture here.",
-    "World entry, quest-log update, post-combat; every 5 minutes and bounded retry. Manual: Quests now. Out of combat.",
-    "World entry, faction update, post-combat; every 5 minutes and bounded retry. Manual: Reputation now. Out of combat.",
-    "World entry, post-combat, PLAYER_MONEY notification; every 5 minutes and bounded retry. Manual: Gold now. Out of combat.",
-    "World entry, post-combat, CURRENCY_DISPLAY_UPDATE notification; every 5 minutes and bounded retry. Manual: Currencies now. Out of combat.",
-    "World entry, post-combat, PLAYER_PVP_RANK_CHANGED notification; every 5 minutes and bounded retry. Manual: Honor now. Out of combat.",
-    "World entry and post-combat; every 5 minutes and bounded retry. Manual: Titles now. No unverified title event. Out of combat.",
+local triggers={
+ "Auto-start at world entry if opted in. Turning off auto-start does not stop logging already active.",
+ "World entry; equipment, level, zone, post-combat; every 5 minutes. Manual Scan out of combat.",
+ "World entry, delayed bag updates, bag opening, post-combat; every 5 minutes. Manual Scan out of combat.",
+ "Bank opens, slots/tabs change, own-bank page selection. Manual Scan requires open own bank, out of combat.",
+ "World entry, equipment, bags, post-combat; bank events for bank items; every 5 minutes for bags/gear. Manual Scan bags/gear, bank details follow bank scan.",
+ "World entry, quest updates, post-combat; every 5 minutes and bounded retry. Manual Scan out of combat.",
+ "World entry, faction updates, post-combat; every 5 minutes and bounded retry. Manual Scan out of combat.",
+ "World entry, post-combat, money updates; every 5 minutes and bounded retry. Manual Scan out of combat.",
+ "World entry, post-combat, currency updates; every 5 minutes and bounded retry. Manual Scan out of combat.",
+ "World entry, post-combat, PvP-rank updates; every 5 minutes and bounded retry. Manual Scan out of combat.",
+ "World entry and post-combat; every 5 minutes and bounded retry. Manual Scan out of combat.",
 }
-local function safeSummary(key)
-    local fn = _G.MclarionWow_DashboardSummary
-    if type(fn) ~= "function" then return "Stored data: summary unavailable." end
-    if type(issecretvalue) ~= "function" then return "Stored data: summary unavailable." end
-    local protected, hidden = pcall(issecretvalue, fn)
-    if not protected or hidden then return "Stored data: summary unavailable." end
-    local ok, value = pcall(fn, key)
-    if not ok then return "Stored data: summary unavailable." end
-    protected, hidden = pcall(issecretvalue, value)
-    if not protected or hidden then return "Stored data: summary unavailable." end
-    if type(value) ~= "string" or #value > 240 then
-        return "Stored data: summary unavailable."
-    end
-    return "Stored data: " .. value
+local function safeRead(name,key,limit,fallback)
+ if type(issecretvalue)~="function" then return fallback end
+ local fn=_G[name]
+ local ok,secret=pcall(issecretvalue,fn)
+ if not ok or secret or type(fn)~="function" then return fallback end
+ local success,value=pcall(fn,key)
+ if not success then return fallback end
+ ok,secret=pcall(issecretvalue,value)
+ if not ok or secret or type(value)~="string" or #value>limit then return fallback end
+ return value
 end
-
--- model: status(key), auto(key), toggle(key, value), action(key); all actions explicit.
+local function measure(label,value)
+ label:SetHeight(0);label:SetText(value);local height=math.max(14,label:GetStringHeight())
+ label:SetHeight(height);return height
+end
+local function wheel(self,delta)
+ self:SetVerticalScroll(math.max(0,math.min(self:GetVerticalScrollRange(),self:GetVerticalScroll()-delta*35)))
+end
 function MclarionWow_CreateDashboard(model)
-    local window = CreateFrame("Frame", "MclarionWowSettingsFrame", UIParent, "BasicFrameTemplateWithInset")
-    local width, height = 520, 515
-    if UIParent and type(UIParent.GetWidth) == "function" and type(UIParent.GetHeight) == "function" then
-        local okW, w = pcall(UIParent.GetWidth, UIParent)
-        local okH, h = pcall(UIParent.GetHeight, UIParent)
-        if okW and type(w) == "number" and w > 0 then width = math.min(width, math.max(1, w - 28)) end
-        if okH and type(h) == "number" and h > 0 then height = math.min(height, math.max(1, h - 28)) end
-    end
-    window:SetSize(width, height)
-    window:SetPoint("CENTER")
-    window:SetFrameStrata("DIALOG")
-    window:SetMovable(true)
-    window:EnableMouse(true)
-    window:RegisterForDrag("LeftButton")
-    window:SetScript("OnDragStart", window.StartMoving)
-    window:SetScript("OnDragStop", window.StopMovingOrSizing)
-    local contentWidth = math.max(80, width - 44)
-    local function measure(label, value)
-        label:SetText(value)
-        local h = label:GetStringHeight()
-        label:SetHeight(math.max(14, h))
-        return math.max(14, h)
-    end
-    local function text(font, y, value, maxWidth)
-        local label = window:CreateFontString(nil, "OVERLAY", font)
-        label:SetPoint("TOPLEFT", 18, y)
-        label:SetWidth(maxWidth or contentWidth)
-        label:SetJustifyH("LEFT")
-        measure(label, value)
-        return label
-    end
-    text("GameFontNormalLarge", -32, "Vaultkeeper | offline dashboard", contentWidth - 38)
-    text("GameFontNormal", -57, "Auto-capture runs with window closed; no upload.")
-    local indexHeight = math.min(140, math.max(30, height - 230))
-    local indexWidth = math.max(55, contentWidth - 30)
-    local index = CreateFrame("ScrollFrame", nil, window)
-    index:SetSize(indexWidth, indexHeight)
-    index:SetPoint("TOPLEFT", 18, -77)
-    local indexContent = CreateFrame("Frame", nil, index)
-    indexContent:SetSize(indexWidth, indexHeight)
-    index:SetScrollChild(indexContent)
-    local linkWidth = math.min(116, indexWidth * 0.36)
-    local links, statusLabels, rowOffsets = {}, {}, {}
-    for i, key in ipairs(keys) do
-        local link = CreateFrame("Button", nil, indexContent, "UIPanelButtonTemplate")
-        link:SetSize(linkWidth, 25)
-        link:SetText(names[i])
-        links[i] = link
-        local label = indexContent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        label:SetWidth(math.max(18, indexWidth - linkWidth - 9))
-        label:SetJustifyH("LEFT")
-        statusLabels[i] = label
-    end
-    local controlTop = 80 + indexHeight
-    local compact = height <= 280
-    local actionWidth = compact and math.min(115, contentWidth / 2) or math.min(190, contentWidth / 2)
-    local position = text("GameFontNormalLarge", -controlTop, "",
-        compact and contentWidth - actionWidth - 8 or contentWidth - 5)
-    local checks, actions = {}, {}
-    for _, i in ipairs({5, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11}) do
-        local key = keys[i]
-        local check = CreateFrame("CheckButton", nil, window, "UICheckButtonTemplate")
-        check:SetPoint("TOPLEFT", 18, -(controlTop + 22))
-        checks[i] = check
-        local action = CreateFrame("Button", nil, window, "UIPanelButtonTemplate")
-        action:SetSize(actionWidth, 25)
-        action:SetPoint("TOPLEFT", compact and (18 + contentWidth - actionWidth) or 18,
-            -(controlTop + (compact and 0 or 53)))
-        action:SetText(key == "combat" and "Stop logging now" or
-            ({character="Character now",bags="Bags now",bank="Bank now",items="Items now",
-            quest="Quests now",reputation="Reputation now",gold="Gold now",
-            currency="Currencies now",honor="Honor now",title="Titles now"})[key])
-        actions[i] = action
-    end
-    local optLabel = text("GameFontNormal", -(controlTop + 26), "Automatic capture / logging", math.max(35, contentWidth - 45))
-    optLabel:ClearAllPoints()
-    optLabel:SetPoint("TOPLEFT", 58, -(controlTop + 26))
-    local footer = text("GameFontNormal", -height + 36, "Saves at /reload or exit; memory != disk.", contentWidth)
-    footer:ClearAllPoints(); footer:SetPoint("BOTTOMLEFT", 18, 36)
-    local detailTop = controlTop + (compact and 52 or 80)
-    local detailHeight = math.max(1, height - detailTop - 36 - footer:GetHeight() - 6)
-    local scroll = CreateFrame("ScrollFrame", nil, window)
-    scroll:SetSize(contentWidth, detailHeight)
-    scroll:SetPoint("TOPLEFT", 18, -detailTop)
-    local content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(contentWidth, detailHeight)
-    scroll:SetScrollChild(content)
-    local function body(font)
-        local label = content:CreateFontString(nil, "OVERLAY", font)
-        label:SetWidth(contentWidth - 8)
-        label:SetJustifyH("LEFT")
-        return label
-    end
-    local scope, trigger, result, timing, summary = body("GameFontHighlight"), body("GameFontHighlight"),
-        body("GameFontHighlight"), body("GameFontHighlight"), body("GameFontHighlight")
-    local function wheel(self, delta)
-        self:SetVerticalScroll(math.max(0, math.min(self:GetVerticalScrollRange(),
-            self:GetVerticalScroll() - delta * 35)))
-    end
-    scroll:EnableMouseWheel(true); scroll:SetScript("OnMouseWheel", wheel)
-    index:EnableMouseWheel(true); index:SetScript("OnMouseWheel", wheel)
-    local up, down = CreateFrame("Button", nil, window, "UIPanelButtonTemplate"),
-        CreateFrame("Button", nil, window, "UIPanelButtonTemplate")
-    local arrowHeight = math.min(22, indexHeight / 2)
-    up:SetSize(25, arrowHeight); up:SetPoint("TOPLEFT", 19 + indexWidth, -77); up:SetText("^")
-    down:SetSize(25, arrowHeight); down:SetPoint("TOPLEFT", 19 + indexWidth, -(77 + indexHeight - arrowHeight)); down:SetText("v")
-    up:SetScript("OnClick", function() wheel(index, 1) end)
-    down:SetScript("OnClick", function() wheel(index, -1) end)
-    local previous = CreateFrame("Button", nil, window, "UIPanelButtonTemplate")
-    previous:SetSize(math.min(95, contentWidth / 3), 23)
-    previous:SetPoint("BOTTOMLEFT", 18, 10)
-    previous:SetText("Previous")
-    local nextButton = CreateFrame("Button", nil, window, "UIPanelButtonTemplate")
-    nextButton:SetSize(math.min(95, contentWidth / 3), 23)
-    nextButton:SetPoint("BOTTOMRIGHT", -18, 10)
-    nextButton:SetText("Next")
-    local detailUp, detailDown = CreateFrame("Button", nil, window, "UIPanelButtonTemplate"),
-        CreateFrame("Button", nil, window, "UIPanelButtonTemplate")
-    detailUp:SetSize(27, 23); detailUp:SetPoint("BOTTOM", window, "BOTTOM", -17, 10); detailUp:SetText("^")
-    detailDown:SetSize(27, 23); detailDown:SetPoint("BOTTOM", window, "BOTTOM", 17, 10); detailDown:SetText("v")
-    detailUp:SetScript("OnClick", function() wheel(scroll, 1) end)
-    detailDown:SetScript("OnClick", function() wheel(scroll, -1) end)
-    local current = 1
-    local function refresh()
-        local key = keys[current]
-        local state = model.status(key)
-        measure(position, names[current] .. "  (" .. current .. "/11)")
-        local y = 0
-        local function place(label, value)
-            label:ClearAllPoints()
-            label:SetPoint("TOPLEFT", 0, -y)
-            y = y + measure(label, value) + 8
-        end
-        place(scope, "Auto-capture works with this window closed; no upload.\nCaptured: " .. scopes[current])
-        place(trigger, "Triggers: " .. triggers[current])
-        place(result, "Result: " .. state.message)
-        place(timing, "Last request (memory): " .. (state.attempt or "none this session") ..
-            "\nLast changed capture (memory): " .. (state.success or "none this session"))
-        place(summary, safeSummary(key))
-        content:SetSize(contentWidth, math.max(detailHeight, y))
-        local row = 0
-        for i = 1, #keys do
-            checks[i]:SetChecked(model.auto(keys[i]) == true)
-            local observation = model.status(keys[i])
-            local label = statusLabels[i]
-            local value = ((keys[i] == "bank" and "Bank") or (keys[i] == "items" and "Items") or names[i]) .. ": " .. observation.message ..
-                " | Auto: " .. (checks[i]:GetChecked() and "on" or "off") ..
-                " | Last success (memory, this session): " .. (observation.success or "none")
-            local labelHeight = measure(label, value)
-            rowOffsets[i] = row
-            links[i]:ClearAllPoints(); links[i]:SetPoint("TOPLEFT", 0, -row)
-            label:ClearAllPoints()
-            label:SetPoint("TOPLEFT", linkWidth + 7, -row)
-            row = row + math.max(25, labelHeight) + 8
-            if i == current then checks[i]:Show(); actions[i]:Show()
-            else checks[i]:Hide(); actions[i]:Hide() end
-        end
-        indexContent:SetSize(indexWidth, math.max(indexHeight, row))
-        scroll:SetVerticalScroll(math.min(scroll:GetVerticalScroll(), scroll:GetVerticalScrollRange()))
-        index:SetVerticalScroll(math.min(index:GetVerticalScroll(), index:GetVerticalScrollRange()))
-    end
-    for i, key in ipairs(keys) do
-        checks[i]:SetScript("OnClick", function(self)
-            model.toggle(key, self:GetChecked() == true)
-            refresh()
-        end)
-        actions[i]:SetScript("OnClick", function()
-            model.action(key); refresh()
-        end)
-    end
-    local categoryScroll = index
-    local function navigate(index)
-        if type(index) == "string" then
-            for i, key in ipairs(keys) do if key == index then index = i; break end end
-        end
-        if type(index) == "number" and index == math.floor(index) and index >= 1 and index <= #keys then
-            current = index; scroll:SetVerticalScroll(0); refresh()
-            if rowOffsets[index] < categoryScroll:GetVerticalScroll() or
-                rowOffsets[index] + 25 > categoryScroll:GetVerticalScroll() + indexHeight then
-                categoryScroll:SetVerticalScroll(math.min(categoryScroll:GetVerticalScrollRange(), rowOffsets[index]))
-            end
-            return true
-        end
-        return false
-    end
-    for i = 1, #keys do
-        links[i]:SetScript("OnClick", function() navigate(i) end)
-    end
-    previous:SetScript("OnClick", function()
-        navigate(current == 1 and #keys or current - 1)
-    end)
-    nextButton:SetScript("OnClick", function()
-        navigate(current == #keys and 1 or current + 1)
-    end)
-    -- Wheel is optional, buttons remain a complete keyboard/mouse navigation route.
-    if type(window.EnableMouseWheel) == "function" then
-        window:EnableMouseWheel(true)
-        window:SetScript("OnMouseWheel", function(_, delta)
-            navigate(delta > 0 and (current == 1 and #keys or current - 1) or
-                (current == #keys and 1 or current + 1))
-        end)
-    end
-    MclarionWow_DashboardNavigate = navigate
-    MclarionWow_DashboardRefresh = refresh
-    refresh()
-    window:Hide()
-    return window
+ local panel=CreateFrame("Frame","MclarionWowSettingsFrame",UIParent,"BasicFrameTemplateWithInset")
+ local width,height=1000,700
+ if UIParent and type(UIParent.GetWidth)=="function" and type(UIParent.GetHeight)=="function" then
+  local ok,value=pcall(UIParent.GetWidth,UIParent)
+  if ok and type(value)=="number" and value>0 then width=math.min(width,math.max(1,value-28)) end
+  ok,value=pcall(UIParent.GetHeight,UIParent)
+  if ok and type(value)=="number" and value>0 then height=math.min(height,math.max(1,value-28)) end
+ end
+ panel:SetSize(width,height);panel:SetPoint("CENTER");panel:SetFrameStrata("DIALOG")
+ panel:SetMovable(true);panel:EnableMouse(true);panel:RegisterForDrag("LeftButton")
+ panel:SetScript("OnDragStart",panel.StartMoving);panel:SetScript("OnDragStop",panel.StopMovingOrSizing)
+ local function label(parent,font,w,value,x,y)
+  local text=parent:CreateFontString(nil,"OVERLAY",font)
+  text:SetWidth(w);text:SetJustifyH("LEFT");text:SetPoint("TOPLEFT",x,y)
+  measure(text,value);return text
+ end
+ local fullWidth=math.max(1,width-36)
+ label(panel,"GameFontNormalLarge",fullWidth,"Vaultkeeper | offline dashboard",18,-30)
+ label(panel,"GameFontNormal",fullWidth,"Auto-capture runs with window closed; no upload. Select a category to inspect saved observations.",18,-54)
+ local footer=label(panel,"GameFontNormal",fullWidth,"Saves at /reload or exit; memory != disk.",18,-height+40)
+ footer:ClearAllPoints();footer:SetPoint("BOTTOMLEFT",18,35)
+ local compact=width<800
+ local available=math.max(30,height-115-footer:GetHeight())
+ local listWidth=compact and fullWidth or math.max(220,math.floor(fullWidth*0.59))
+ local detailWidth=compact and fullWidth or math.max(60,fullWidth-listWidth-12)
+ local listHeight=compact and math.max(1,math.floor(available*0.57)) or available
+ local detailHeight=compact and math.max(1,available-listHeight-8) or available
+ local list=CreateFrame("ScrollFrame",nil,panel)
+ list:SetSize(listWidth,listHeight);list:SetPoint("TOPLEFT",18,-78)
+ local rows=CreateFrame("Frame",nil,list);local rowHeight=compact and 64 or 48
+ rows:SetSize(listWidth,math.max(listHeight,rowHeight*#keys))
+ list:SetScrollChild(rows);list:EnableMouseWheel(true);list:SetScript("OnMouseWheel",wheel)
+ local detail=CreateFrame("ScrollFrame",nil,panel)
+ detail:SetSize(detailWidth,detailHeight)
+ detail:SetPoint("TOPLEFT",compact and 18 or (30+listWidth),compact and -(86+listHeight) or -78)
+ local content=CreateFrame("Frame",nil,detail)
+ content:SetSize(detailWidth,detailHeight);detail:SetScrollChild(content)
+ detail:EnableMouseWheel(true);detail:SetScript("OnMouseWheel",wheel)
+ local selectorWidth=compact and math.min(86,listWidth*0.33) or 115
+ local checkX=selectorWidth+4;local scanX=checkX+27;local statusX=scanX+73
+ local statusWidth=compact and math.max(20,listWidth-8) or math.max(20,listWidth-statusX-7)
+ local statusLeft=compact and 0 or statusX
+ local statusY=compact and -26 or 0
+ local summaryY=compact and -44 or -25
+ local links,checks,statuses,summaries={},{},{},{}
+ for i,key in ipairs(keys) do
+  local y=-(i-1)*rowHeight
+  local link=CreateFrame("Button",nil,rows,"UIPanelButtonTemplate")
+  link:SetSize(selectorWidth,25);link:SetPoint("TOPLEFT",0,y);link:SetText(names[i]);links[i]=link
+  local check=CreateFrame("CheckButton",nil,rows,"UICheckButtonTemplate")
+  check:SetPoint("TOPLEFT",checkX,y);check:Show();checks[i]=check
+  if key~="combat" then
+   local scan=CreateFrame("Button",nil,rows,"UIPanelButtonTemplate")
+   scan:SetSize(67,25);scan:SetPoint("TOPLEFT",scanX,y);scan:SetText("Scan")
+   scan:SetScript("OnClick",function() model.action(key);MclarionWow_DashboardRefresh() end)
+  end
+  statuses[i]=label(rows,"GameFontHighlight",statusWidth,"",statusLeft,y+statusY)
+  summaries[i]=label(rows,"GameFontHighlight",statusWidth,"",statusLeft,y+summaryY)
+  check:SetScript("OnClick",function(self) model.toggle(key,self:GetChecked()==true);MclarionWow_DashboardRefresh() end)
+ end
+ local detailLabels={}
+ for i=1,6 do
+  local text=content:CreateFontString(nil,"OVERLAY",i==1 and "GameFontNormalLarge" or "GameFontHighlight")
+  text:SetWidth(math.max(12,detailWidth-8));text:SetJustifyH("LEFT");detailLabels[i]=text
+ end
+ local current=1
+ local function refresh()
+  for i,key in ipairs(keys) do
+   local state=model.status(key)
+   checks[i]:SetChecked(model.auto(key)==true)
+   local message=type(state.message)=="string" and state.message or "Status unavailable."
+   local maxStatus=math.max(1,math.floor(statusWidth/7)-22)
+   if #message>maxStatus then message=message:sub(1,math.max(1,maxStatus-3)).."..." end
+   measure(statuses[i],"Status: "..message.." | Auto: "..(checks[i]:GetChecked() and "on" or "off"))
+   local summary=safeRead("MclarionWow_DashboardSummary",key,240,"summary unavailable.")
+   local maxSummary=math.max(1,math.floor(statusWidth/7)-16)
+   if #summary>maxSummary then summary=summary:sub(1,math.max(1,maxSummary-3)).."..." end
+   measure(summaries[i],"Stored data: "..summary)
+  end
+  local state=model.status(keys[current]);local y=0
+  local values={names[current].."  ("..current.."/11)",
+   "Auto-capture works with this window closed; no upload.\nCaptured: "..scopes[current],
+   "Triggers: "..triggers[current],names[current]..": "..(state.message or "Unavailable.").." | Auto: "..(checks[current]:GetChecked() and "on" or "off"),
+   "Last request (memory): "..(state.attempt or "none this session").."\nLast success (memory, this session): "..(state.success or "none this session"),
+   "Stored observations:\n"..safeRead("MclarionWow_DashboardDetails",keys[current],32768,"Saved-data details unavailable.")}
+  for i,value in ipairs(values) do
+   local text=detailLabels[i];text:ClearAllPoints();text:SetPoint("TOPLEFT",0,-y)
+   y=y+measure(text,value)+9
+  end
+  content:SetSize(detailWidth,math.max(detailHeight,y))
+  detail:SetVerticalScroll(math.min(detail:GetVerticalScroll(),detail:GetVerticalScrollRange()))
+ end
+ local function navigate(index)
+  if type(index)=="string" then
+   local found
+   for i,key in ipairs(keys) do if key==index then found=i;break end end
+   index=found
+  end
+  if type(index)~="number" or index~=math.floor(index) or index<1 or index>#keys then return false end
+  current=index;detail:SetVerticalScroll(0);refresh()
+  local y=(index-1)*rowHeight
+  if y<list:GetVerticalScroll() or y+rowHeight>list:GetVerticalScroll()+listHeight then
+   list:SetVerticalScroll(math.min(list:GetVerticalScrollRange(),y))
+  end
+  return true
+ end
+ for i=1,#keys do links[i]:SetScript("OnClick",function() navigate(i) end) end
+ local previous=CreateFrame("Button",nil,panel,"UIPanelButtonTemplate")
+ previous:SetSize(math.min(95,fullWidth/3),23);previous:SetPoint("BOTTOMLEFT",18,10);previous:SetText("Previous")
+ previous:SetScript("OnClick",function() navigate(current==1 and #keys or current-1) end)
+ local nextButton=CreateFrame("Button",nil,panel,"UIPanelButtonTemplate")
+ nextButton:SetSize(math.min(95,fullWidth/3),23);nextButton:SetPoint("BOTTOMRIGHT",-18,10);nextButton:SetText("Next")
+ nextButton:SetScript("OnClick",function() navigate(current==#keys and 1 or current+1) end)
+ local up,down=CreateFrame("Button",nil,panel,"UIPanelButtonTemplate"),CreateFrame("Button",nil,panel,"UIPanelButtonTemplate")
+ up:SetSize(27,23);up:SetPoint("BOTTOM",panel,"BOTTOM",-17,10);up:SetText("^")
+ down:SetSize(27,23);down:SetPoint("BOTTOM",panel,"BOTTOM",17,10);down:SetText("v")
+ up:SetScript("OnClick",function() wheel(detail,1) end)
+ down:SetScript("OnClick",function() wheel(detail,-1) end)
+ MclarionWow_DashboardNavigate=navigate;MclarionWow_DashboardRefresh=refresh
+ refresh();panel:Hide();return panel
 end

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and validate the offline two-addon 0.12.3 candidate ZIP.
+"""Build and validate the offline two-addon 0.12.4 candidate ZIP.
 
 No player files, network, installation or consumer edits.
 """
@@ -9,6 +9,7 @@ import zipfile
 
 FILES = (
     "MclarionWow/DashboardSummary.lua",
+    "MclarionWow/DashboardDetails.lua",
     "MclarionWow/DashboardUI.lua",
     "MclarionWow/MclarionWow.lua",
     "MclarionWow/MclarionWow.toc",
@@ -49,11 +50,13 @@ def validate_archive(path):
             raise ValueError("archive must contain precisely the declared runtime files")
         main = archive.read("MclarionWow/MclarionWow.toc").decode("utf-8")
         extra = archive.read("MclarionWowProgression/MclarionWowProgression.toc").decode("utf-8")
+        if "## Version: 0.12.4-candidate" not in main or "## Version: 0.12.4-candidate" not in extra:
+            raise ValueError("candidate version mismatch")
         if saved_variables(main) != ["MclarionWowData"] or dependencies(main):
             raise ValueError("legacy save owner or dependency changed")
         if saved_variables(extra) != ["MclarionWowQuestData", "MclarionWowReputationData", "MclarionWowWealthData", "MclarionWowHonorTitleData"] or dependencies(extra) != ["MclarionWow"]:
             raise ValueError("progression must own all four companion data roots and require legacy addon")
-        for folder, toc, expected in (("MclarionWow", main, ["DashboardSummary.lua", "DashboardUI.lua", "MclarionWow.lua"]),
+        for folder, toc, expected in (("MclarionWow", main, ["DashboardSummary.lua", "DashboardDetails.lua", "DashboardUI.lua", "MclarionWow.lua"]),
                                        ("MclarionWowProgression", extra, ["QuestCapture.lua", "ReputationCapture.lua", "WealthCapture.lua", "HonorTitleCapture.lua"])):
             if runtime_files(toc) != expected:
                 raise ValueError("unexpected or missing runtime script for " + folder)
@@ -71,6 +74,7 @@ def build(root, output):
     root, output = Path(root), Path(output)
     data = {
         "MclarionWow/DashboardSummary.lua": (root / "DashboardSummary.lua").read_bytes(),
+        "MclarionWow/DashboardDetails.lua": (root / "DashboardDetails.lua").read_bytes(),
         "MclarionWow/DashboardUI.lua": (root / "DashboardUI.lua").read_bytes(),
         "MclarionWow/MclarionWow.lua": (root / "MclarionWow.lua").read_bytes(),
         "MclarionWow/MclarionWow.toc": (root / "MclarionWow.toc").read_bytes(),

@@ -94,6 +94,25 @@ _G.C_Bank = {
 }
 
 local frames = {}
+local function inside(frame, panel)
+    local parent = frame.parent
+    while parent and parent ~= panel do parent = parent.parent end
+    return parent == panel
+end
+local function scanButtons(panel)
+    local mapped = {}
+    local names = {"Character now", "Bags now", "Bank now", "Items now",
+        "Quests now", "Reputation now", "Gold now", "Currencies now",
+        "Honor now", "Titles now"}
+    local count = 0
+    for _, frame in ipairs(frames) do
+        if inside(frame, panel) and frame.frameType == "Button" and frame.text == "Scan" then
+            count = count + 1
+            mapped[names[count]] = frame
+        end
+    end
+    return mapped
+end
 local function dashboardLabels(panel)
     local labels = {}
     for _, frame in ipairs(frames) do
@@ -193,6 +212,7 @@ _G.GameFontHighlight = {}
 _G.GameFontDisable = {}
 
 local chunk, loadError = loadfile(addonPath)
+assert(loadfile("../DashboardDetails.lua"))()
 assert(loadfile("../DashboardUI.lua"))()
 if not chunk then
     io.stderr:write("FAIL: addon loads: " .. tostring(loadError) .. "\n")
@@ -1771,12 +1791,7 @@ if minimapButton and minimapButton.scripts.OnClick then
         "dashboard exposes navigation and safe read-only refresh")
     minimapButton.scripts.OnClick(minimapButton)
     expectTrue(panel and not panel:IsShown(), "minimap icon closes the addon settings")
-    local actionButtons = {}
-    for _, frame in ipairs(frames) do
-        if frame.parent == panel and frame.frameType == "Button" then
-            actionButtons[frame.text] = frame
-        end
-    end
+    local actionButtons = scanButtons(panel)
     for _, label in ipairs({ "Character now", "Bags now", "Bank now", "Items now" }) do
         expectTrue(actionButtons[label] and type(actionButtons[label].scripts.OnClick) == "function",
             label .. " provides an explicit capture without a copy window")
@@ -2095,7 +2110,7 @@ if captureFrame then
         end
         local refused = false
         for _, label in ipairs(dashboardLabels(panel)) do
-            if label.text and label.text:find("Bank: Capture unavailable", 1, true) then refused = true end
+            if label.text and label.text:find("Status: Capture unavailable", 1, true) then refused = true end
         end
         expectTrue(refused, "settings report a refused automatic bank snapshot")
         MclarionWowData.bank = savedBank
@@ -2120,7 +2135,9 @@ if type(SlashCmdList.MCLARIONWOWUI) == "function" then
         "opted-in automatic capture settings stay enabled")
     local checkboxes = {}
     for _, frame in ipairs(frames) do
-        if frame.parent == panel and frame.frameType == "CheckButton" then
+        local parent = frame.parent
+        if parent and parent.parent and parent.parent.parent == panel and
+            frame.frameType == "CheckButton" then
             checkboxes[#checkboxes + 1] = frame
         end
     end
@@ -2172,7 +2189,7 @@ if type(SlashCmdList.MCLARIONWOWUI) == "function" then
         local bagMap = MclarionWowData.bags
         MclarionWowData.bags = "unsupported"
         captureFrame.scripts.OnEvent(captureFrame, "BAG_OPEN", 0)
-        expectTrue(statusContains("Bags: Capture unavailable"),
+        expectTrue(statusContains("Status: Capture unavailable"),
             "settings report rejected automatic bag storage")
         MclarionWowData.bags = bagMap
         local protectedItem = protectedSentinel()
@@ -2181,7 +2198,7 @@ if type(SlashCmdList.MCLARIONWOWUI) == "function" then
             if bag == 0 then return protectedItem end
         end
         captureFrame.scripts.OnEvent(captureFrame, "BAG_OPEN", 0)
-        expectTrue(statusContains("Bags: Capture unavailable"),
+        expectTrue(statusContains("Status: Capture unavailable"),
             "settings report a protected bag scan without exposing item details")
         C_Container.GetContainerItemInfo = originalBagInfo
         secretValues[protectedItem] = nil
@@ -2214,15 +2231,20 @@ if type(SlashCmdList.MCLARIONWOWUI) == "function" then
     for _, frame in ipairs(frames) do
         if frame.name == "MclarionWowSettingsFrame" then reloadedPanel = frame end
     end
-    local autoStart, stopNow
+    local autoStart, scanCount, hasStop = nil, 0, false
     for _, frame in ipairs(frames) do
-        if frame.parent == reloadedPanel and frame.frameType == "CheckButton" and not autoStart then
+        local parent = frame.parent
+        if parent and parent.parent and parent.parent.parent == reloadedPanel and
+            frame.frameType == "CheckButton" and not autoStart then
             autoStart = frame
-        elseif frame.parent == reloadedPanel and frame.frameType == "Button" and
-            frame.text == "Stop logging now" then
-            stopNow = frame
+        elseif parent and parent.parent and parent.parent.parent == reloadedPanel and
+            frame.frameType == "Button" and frame.text == "Scan" then
+            scanCount = scanCount + 1
         end
+        if inside(frame,reloadedPanel) and frame.text == "Stop logging now" then hasStop = true end
     end
+    expectTrue(not hasStop, "retired stop control is absent")
+    expectEqual(scanCount, 10, "only capture categories have manual Scan controls")
     autoStart:SetChecked(false)
     autoStart.scripts.OnClick(autoStart)
     expectEqual(combatLogging, true, "switch-off after reload never guesses who started active logging")
@@ -2231,11 +2253,9 @@ if type(SlashCmdList.MCLARIONWOWUI) == "function" then
         if label.text and label.text:find("other source", 1, true) then attributedElsewhere = true end
     end
     expectEqual(attributedElsewhere, false, "status never misattributes the logging source after reload")
-    expectTrue(stopNow ~= nil, "explicit Stop logging now control survives a UI reload")
-    if stopNow then stopNow.scripts.OnClick(stopNow) end
-    expectEqual(combatLogging, false, "explicit player action can stop logging after a UI reload")
+    expectEqual(combatLogging, true, "UI has no action that stops logging after reload")
     expectEqual(MclarionWowData.settings.autoCombatLog, false,
-        "explicit stop also disables automatic restart on the next world entry")
+        "preference off disables automatic restart without stopping current logging")
 end
 
 MclarionWowData = { schema = 1, characters = {}, settings = {
@@ -2294,7 +2314,7 @@ for _, frame in ipairs(frames) do
 end
 local itemCheckboxes = {}
 for _, frame in ipairs(frames) do
-    if frame.parent == itemPanel and frame.frameType == "CheckButton" then
+    if inside(frame, itemPanel) and frame.frameType == "CheckButton" then
         itemCheckboxes[#itemCheckboxes + 1] = frame
     end
 end
@@ -2443,16 +2463,22 @@ end
 actionFrame.scripts.OnEvent(actionFrame, "PLAYER_ENTERING_WORLD")
 SlashCmdList.MCLARIONWOWUI()
 local actionPanel, actions
-actions = {}
+actions = nil
 for _, frame in ipairs(frames) do
     if frame.name == "MclarionWowSettingsFrame" then actionPanel = frame end
 end
-for _, frame in ipairs(frames) do
-    if frame.parent == actionPanel and frame.frameType == "Button" then actions[frame.text] = frame end
-end
+actions = scanButtons(actionPanel)
 local function visibleStatus(text)
+    local category = text:match("^([^:]+):")
+    local route = {Character="character",Bags="bags",Bank="bank",Items="items",
+        Quests="quest",Reputation="reputation",Gold="gold",Currencies="currency",
+        Honor="honor",Titles="title",["Combat log"]="combat"}
+    if category and route[category] then MclarionWow_DashboardNavigate(route[category]) end
+    local expected = category and text:gsub("^[^:]+: ","Status: ") or text
+    local detailExpected = category == "Bank" and text:gsub("^Bank:","Character bank:") or text
     for _, label in ipairs(dashboardLabels(actionPanel)) do
-        if label.text and label.text:find(text, 1, true) then return true end
+        if label.text and (label.text:find(expected, 1, true) or
+            label.text:find(detailExpected, 1, true)) then return true end
     end
     return false
 end
@@ -2467,7 +2493,7 @@ local function bodyStatus(text)
     return false
 end
 expectTrue(MclarionWow_DashboardNavigate("items") and
-    bodyStatus("Items now (bags/gear), Bank now (bank details)"),
+    bodyStatus("Manual Scan bags/gear, bank details follow bank scan."),
     "item section explains which manual action updates each source")
 expectTrue(visibleStatus("Auto-capture works with this window closed"),
     "settings explain that the addon window need not remain open")
@@ -2585,7 +2611,7 @@ local unavailableQuestRoot = MclarionWowQuestData
 local unavailableLegacyRoot = MclarionWowData
 local unavailableCheckbox, checkboxIndex = nil, 0
 for _, frame in ipairs(frames) do
-    if frame.parent == actionPanel and frame.frameType == "CheckButton" then
+    if inside(frame, actionPanel) and frame.frameType == "CheckButton" then
         checkboxIndex = checkboxIndex + 1
         if checkboxIndex == 6 then unavailableCheckbox = frame end
     end
@@ -2641,7 +2667,7 @@ expectTrue(visibleStatus("Reputation: Scanned"), "manual reputation status visib
 expectEqual(MclarionWowData, legacyRoot, "reputation does not change legacy root")
 local repCheckbox, repIndex = nil, 0
 for _, frame in ipairs(frames) do
-    if frame.parent == actionPanel and frame.frameType == "CheckButton" then
+    if inside(frame, actionPanel) and frame.frameType == "CheckButton" then
         repIndex = repIndex + 1
         if repIndex == 7 then repCheckbox = frame end
     end
@@ -2692,7 +2718,7 @@ expectTrue(visibleStatus("Quests: Scanned"), "manual quest status is visible")
 expectEqual(MclarionWowData, legacyRoot, "manual quest capture leaves legacy root identity intact")
 local questCheckbox, questIndex = nil, 0
 for _, frame in ipairs(frames) do
-    if frame.parent == actionPanel and frame.frameType == "CheckButton" then
+    if inside(frame, actionPanel) and frame.frameType == "CheckButton" then
         questIndex = questIndex + 1
         if questIndex == 6 then questCheckbox = frame end
     end
@@ -2780,10 +2806,7 @@ expectEqual(MclarionWow_TitleAutoEnabled(), false, "title auto first-run off")
 actionFrame.scripts.OnEvent(actionFrame, "PLAYER_ENTERING_WORLD")
 expectEqual(MclarionWowWealthData, nil, "world entry cannot implicitly opt into wealth")
 expectEqual(MclarionWowHonorTitleData, nil, "world entry cannot implicitly opt into honor or titles")
-local addActions = {}
-for _, frame in ipairs(frames) do
-    if frame.parent == actionPanel and frame.frameType == "Button" then addActions[frame.text] = frame end
-end
+local addActions = scanButtons(actionPanel)
 for _, label in ipairs({"Gold now", "Currencies now", "Honor now", "Titles now"}) do
     expectTrue(addActions[label] ~= nil, label .. " is available in settings")
     if addActions[label] then addActions[label].scripts.OnClick(addActions[label]) end
@@ -2802,7 +2825,7 @@ expectTrue(visibleStatus("Gold: Scanned") and visibleStatus("Currencies: Scanned
 expectEqual(MclarionWowData, legacyRoot, "four manual writes preserve legacy root identity")
 local controls = {}
 for _, frame in ipairs(frames) do
-    if frame.parent == actionPanel and frame.frameType == "CheckButton" then
+    if inside(frame, actionPanel) and frame.frameType == "CheckButton" then
         controls[#controls+1] = frame
     end
 end
@@ -2813,14 +2836,14 @@ for _, frame in ipairs(frames) do
     if frame.parent == actionPanel and frame.text == "Next" then nextButton = frame end
 end
 expectTrue(previousButton and nextButton and
-    MclarionWow_DashboardNavigate("gold") and controls[8].shown and not controls[1].shown,
-    "eleven sections expose navigation without overlapping controls")
+    MclarionWow_DashboardNavigate("gold") and controls[8].shown and controls[1].shown,
+    "all eleven opt-ins remain visible during detail navigation")
 nextButton.scripts.OnClick(nextButton)
-expectTrue(controls[9].shown and not controls[8].shown,
-    "Next moves to the next category")
+expectTrue(controls[9].shown and controls[8].shown,
+    "Next changes detail selection without hiding overview")
 previousButton.scripts.OnClick(previousButton)
-expectTrue(controls[8].shown and not controls[9].shown,
-    "Previous restores the category without another scan")
+expectTrue(controls[8].shown and controls[9].shown,
+    "Previous restores detail without another scan")
 for index=8,11 do
     controls[index]:SetChecked(true)
     controls[index].scripts.OnClick(controls[index])
@@ -3002,13 +3025,18 @@ local function timingStatus(part)
     end
     return false
 end
+MclarionWow_DashboardNavigate("gold")
 expectTrue(timingStatus("Gold: Scanned; captured in memory") and
     timingStatus("Auto: on") and timingStatus("Last success (memory, this session):"),
     "status identifies memory result, automation, and last successful time")
+MclarionWow_DashboardNavigate("currency")
 expectTrue(timingStatus("Currencies: ") and timingStatus("Auto: off"),
     "disabled category status exposes automation off")
-expectTrue(timingStatus("Quests: ") and timingStatus("Reputation: ") and
-    timingStatus("Titles: "), "both pages expose category-specific status")
+expectTrue(MclarionWow_DashboardNavigate("quest") and timingStatus("Quests: ") and
+    MclarionWow_DashboardNavigate("reputation") and timingStatus("Reputation: ") and
+    MclarionWow_DashboardNavigate("title") and timingStatus("Titles: "),
+    "all categories retain selectable status while overview stays visible")
+MclarionWow_DashboardNavigate("gold")
 local firstSuccess=os.date("!%Y-%m-%d %H:%M:%S UTC",now)
 outcomes.gold="refused"
 now=now+60
@@ -3026,8 +3054,7 @@ inCombat=false
 now=now+1
 timingFrame.scripts.OnEvent(timingFrame,"PLAYER_REGEN_ENABLED")
 expectEqual(eventCalls.gold,baseGold+3,"post-combat retry captures deferred event once")
-local manualGold
-for _,frame in ipairs(frames) do if frame.parent==timingPanel and frame.text=="Gold now" then manualGold=frame end end
+local manualGold=scanButtons(timingPanel)["Gold now"]
 outcomes.gold="unchanged"
 manualGold.scripts.OnClick(manualGold)
 expectTrue(timingStatus("Gold: Scanned; unchanged"),"manual unchanged differs from captured memory")
@@ -3095,17 +3122,16 @@ SlashCmdList.MCLARIONWOWUI()
 for i=#frames,1,-1 do if frames[i].name == "MclarionWowSettingsFrame" then
     retryPanel=frames[i]; break end end
 local function retryStatus(fragment)
+    local prefix = fragment:match("^([^:]+):")
+    local route={Quests="quest",Reputation="reputation",Gold="gold",
+        Currencies="currency",Honor="honor",Titles="title"}
+    if prefix and route[prefix] then MclarionWow_DashboardNavigate(route[prefix]) end
     for _, label in ipairs(dashboardLabels(retryPanel)) do
         if label.text and label.text:find(fragment, 1, true) then return true end
     end
     return false
 end
-local retryButtons = {}
-for _, frame in ipairs(frames) do
-    if frame.parent == retryPanel and frame.frameType == "Button" then
-        retryButtons[frame.text] = frame
-    end
-end
+local retryButtons = scanButtons(retryPanel)
 for i=1,6 do retryOutcomes[i] = "same-second" end
 local baseline = {}
 for i=1,6 do baseline[i] = retryCalls[i] end

@@ -1,10 +1,16 @@
 # MclarionWow
 
+## Offline 0.12.4 detail reader scope — not installed (7 October 2026)
+
+`DashboardDetails.lua` adds a standalone read-only `MclarionWow_DashboardDetails(key)` for the existing eleven dashboard keys. It renders the **latest validated saved observation**, with retained history count separate, labels and source scope rather than raw wire/Lua. A 32,768-byte output cap ends with an explicit truncation notice; this is not pagination or a promise every row will fit. It never triggers a scan, changes settings, writes SavedVariables, or imports companion data. The UI, TOC and package integration belong to the separate UI workstream; this module alone is not loaded by the installed addon. See `DATA_STORAGE.md` for the full field inventory and precise limits. The latest player screenshot establishes that installed 0.12.3 rendered a window, **not** that every category captured complete data, that the proposed details UI is installed, or that the display changes capture coverage.
+
+A requested companion **Download** button to `localhost` is **UNDER DEVELOPMENT** documentation-only placeholder; no endpoint, button, listener or file transfer exists in this scope. No in-game link is added pending policy clarification: the official UI Add-On Development Policy §4 prohibits in-game advertisements for goods or services and does not expressly authorize this companion link.
+
 ## Current installation — 0.12.3-candidate hotfix (7 October 2026)
 
 **Installed and separately verified:** public runtime `492f604cd3bf3f8af1818771418cf4b5cf7b1ff5`, all nine installed/public file hashes, both addon versions, four unchanged enabled-state files and both previous 0.12.2 folders in rollback storage. WoW was stopped; executable 1.60.1.70245 was verified. ZIP SHA-256 `89204d669fa5b3053f80704fb4bff4c86cad71b1497fc508467c5f6381fd4305`. No player SavedVariables were read or changed.
 
-The 0.12.2 dashboard crashed because `DashboardUI.lua:130` read mock-only `footer.height`. The hotfix calls `footer:GetHeight()`; private mock geometry reproduces the original nil-arithmetic failure and prevents the test from hiding it. UI116 and integration657 assertions pass on each Lua5.1/5.4, along with broader synthetic tests and two package tests. The eleven sections, scheduling, opt-ins and storage contracts are unchanged. **Next:** open `/mhwowui` during normal play to confirm initialization and rendering; this live check remains pending.
+The 0.12.2 dashboard crashed because `DashboardUI.lua:130` read mock-only `footer.height`. The hotfix calls `footer:GetHeight()`; private mock geometry reproduces the original nil-arithmetic failure and prevents the test from hiding it. UI116 and integration657 assertions pass on each Lua5.1/5.4, along with broader synthetic tests and two package tests. The eleven sections, scheduling, opt-ins and storage contracts are unchanged. A later player screenshot confirms a rendered 0.12.3 window; it does not prove category values, complete capture semantics, or the offline 0.12.4 reader.
 
 ## Historical 0.12.2 installation — superseded by 0.12.3
 

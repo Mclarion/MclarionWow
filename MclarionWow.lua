@@ -1792,29 +1792,10 @@ local function reportLoggingAfterOptOut()
     else
         local checked, active = pcall(LoggingCombat)
         if checked and not isSecret(active) and type(active) == "boolean" then
-            combatMessage = active and "Auto-start off; log still on. Use Stop logging now." or
+            combatMessage = active and "Auto-start off; log still on (managed by WoW)." or
                 "Off; auto-start disabled."
         else
             combatMessage = "Auto-start off; current logging status unavailable."
-        end
-    end
-    refreshSettingsStatus()
-end
-
-local function stopLoggingNow()
-    if isSecret(LoggingCombat) or type(LoggingCombat) ~= "function" then
-        combatMessage = "Stop unavailable: client protects the logging API."
-    else
-        local checked, active = pcall(LoggingCombat)
-        if not checked or isSecret(active) or type(active) ~= "boolean" then
-            combatMessage = "Stop unavailable: logging status is protected."
-        elseif not active then
-            combatMessage = "Off; auto-start disabled."
-        else
-            local stopped = pcall(LoggingCombat, false)
-            local verified, stillActive = pcall(LoggingCombat)
-            combatMessage = stopped and verified and not isSecret(stillActive) and stillActive == false and
-                "Off; auto-start disabled." or "Stop unavailable: client refused; log may still be on."
         end
     end
     refreshSettingsStatus()
@@ -1886,12 +1867,8 @@ local createSettingsWindow = function()
                     "Setting refused; previous preference preserved."))
         end,
         action=function(key)
-            if key=="combat" then
-                local s=settingsRoot()
-                if not s then setMessage(key,"Stop unavailable: addon settings were refused."); return end
-                s.autoCombatLog=false; noteDashboardAttempt(key,"manual stop logging")
-                stopLoggingNow(); return
-            end
+            -- Combat logging is only a status and auto-start preference, never a Scan action.
+            if key=="combat" then return end
             local index=companionIndex[key]
             if index then
                 noteDashboardAttempt(key,"manual " .. key .. " now")
