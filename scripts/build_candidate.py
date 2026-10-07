@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and validate the offline two-addon 0.12.1 candidate ZIP.
+"""Build and validate the offline two-addon 0.12.2 candidate ZIP.
 
 No player files, network, installation or consumer edits.
 """
@@ -8,6 +8,8 @@ from pathlib import Path
 import zipfile
 
 FILES = (
+    "MclarionWow/DashboardSummary.lua",
+    "MclarionWow/DashboardUI.lua",
     "MclarionWow/MclarionWow.lua",
     "MclarionWow/MclarionWow.toc",
     "MclarionWowProgression/MclarionWowProgression.toc",
@@ -44,14 +46,14 @@ def validate_archive(path):
     with zipfile.ZipFile(path) as archive:
         names = archive.namelist()
         if names != list(FILES) or len(names) != len(set(names)):
-            raise ValueError("archive must contain precisely the seven declared runtime files")
+            raise ValueError("archive must contain precisely the declared runtime files")
         main = archive.read("MclarionWow/MclarionWow.toc").decode("utf-8")
         extra = archive.read("MclarionWowProgression/MclarionWowProgression.toc").decode("utf-8")
         if saved_variables(main) != ["MclarionWowData"] or dependencies(main):
             raise ValueError("legacy save owner or dependency changed")
         if saved_variables(extra) != ["MclarionWowQuestData", "MclarionWowReputationData", "MclarionWowWealthData", "MclarionWowHonorTitleData"] or dependencies(extra) != ["MclarionWow"]:
             raise ValueError("progression must own all four companion data roots and require legacy addon")
-        for folder, toc, expected in (("MclarionWow", main, ["MclarionWow.lua"]),
+        for folder, toc, expected in (("MclarionWow", main, ["DashboardSummary.lua", "DashboardUI.lua", "MclarionWow.lua"]),
                                        ("MclarionWowProgression", extra, ["QuestCapture.lua", "ReputationCapture.lua", "WealthCapture.lua", "HonorTitleCapture.lua"])):
             if runtime_files(toc) != expected:
                 raise ValueError("unexpected or missing runtime script for " + folder)
@@ -68,6 +70,8 @@ def validate_archive(path):
 def build(root, output):
     root, output = Path(root), Path(output)
     data = {
+        "MclarionWow/DashboardSummary.lua": (root / "DashboardSummary.lua").read_bytes(),
+        "MclarionWow/DashboardUI.lua": (root / "DashboardUI.lua").read_bytes(),
         "MclarionWow/MclarionWow.lua": (root / "MclarionWow.lua").read_bytes(),
         "MclarionWow/MclarionWow.toc": (root / "MclarionWow.toc").read_bytes(),
         "MclarionWowProgression/MclarionWowProgression.toc":

@@ -1,5 +1,6 @@
 # MclarionWow handoff TODO — 2026-10-05
 
+- [ ] Finish targeted rereview and package the 0.12.2 dashboard: labelled eleven-status index, direct section links, measured wrapped text, last-request labels and protected-summary guards. Parent verified 107 UI and 657 integration assertions on each Lua 5.1/5.4, plus two packaging tests after fixes. Earlier complete suite passed; fresh fixture generation is repaired and validated separately. Installed remains 0.12.1; player reports client 1.60.1.70245. Publish audited source and install only after stopped-client verification and paired backup/readback. Live rendering remains unverified.
 - [x] Authorized 0.12.1 publication/install completed 6 October: runtime `4319e3d5a11ad91588b3b53a0230dc98ad8fd9ce`, seven public/installed file hashes, both versions, four enabled states and complete 0.12.0 paired backup independently verified with WoW stopped. No player save read or change.
 - [ ] Observe 0.12.1 event capture and rendered statuses during normal play; no repeated preflight and no need to manufacture PvP/title/currency changes. Earlier offline installation gates below are now complete; live validation remains pending.
 

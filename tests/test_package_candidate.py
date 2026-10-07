@@ -24,6 +24,7 @@ class CandidatePackageTests(unittest.TestCase):
             with zipfile.ZipFile(output) as archive:
                 names = archive.namelist()
                 self.assertEqual(names, [
+                    "MclarionWow/DashboardSummary.lua", "MclarionWow/DashboardUI.lua",
                     "MclarionWow/MclarionWow.lua", "MclarionWow/MclarionWow.toc",
                     "MclarionWowProgression/MclarionWowProgression.toc",
                     "MclarionWowProgression/QuestCapture.lua",
@@ -36,7 +37,7 @@ class CandidatePackageTests(unittest.TestCase):
                 self.assertEqual(module.saved_variables(main), ["MclarionWowData"])
                 self.assertEqual(module.saved_variables(progression), ["MclarionWowQuestData", "MclarionWowReputationData", "MclarionWowWealthData", "MclarionWowHonorTitleData"])
                 self.assertEqual(module.dependencies(progression), ["MclarionWow"])
-                self.assertEqual(module.runtime_files(main), ["MclarionWow.lua"])
+                self.assertEqual(module.runtime_files(main), ["DashboardSummary.lua", "DashboardUI.lua", "MclarionWow.lua"])
                 self.assertEqual(module.runtime_files(progression), ["QuestCapture.lua", "ReputationCapture.lua", "WealthCapture.lua", "HonorTitleCapture.lua"])
                 for folder, toc in (("MclarionWow", main), ("MclarionWowProgression", progression)):
                     for script in module.runtime_files(toc):
@@ -45,8 +46,9 @@ class CandidatePackageTests(unittest.TestCase):
                                "WealthCapture.lua", "HonorTitleCapture.lua"):
                     self.assertEqual(archive.read("MclarionWowProgression/" + script),
                                      (ROOT / script).read_bytes())
-                self.assertEqual(archive.read("MclarionWow/MclarionWow.lua"),
-                                 (ROOT / "MclarionWow.lua").read_bytes())
+                for script in ("DashboardSummary.lua", "DashboardUI.lua", "MclarionWow.lua"):
+                    self.assertEqual(archive.read("MclarionWow/" + script),
+                                     (ROOT / script).read_bytes())
                 module.validate_archive(output)
 
     def test_missing_dependency_is_rejected(self):

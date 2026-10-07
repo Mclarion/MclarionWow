@@ -3,7 +3,9 @@
 ## Title: MclarionWow
 ## Notes: Opt-in Forever snapshots; quest controls require MclarionWowProgression.
 ## Author: Mclarion
-## Version: 0.12.1-candidate
+## Version: 0.12.2-candidate
 ## SavedVariables: MclarionWowData
 
+DashboardSummary.lua
+DashboardUI.lua
 MclarionWow.lua

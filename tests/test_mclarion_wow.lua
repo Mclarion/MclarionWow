@@ -94,6 +94,17 @@ _G.C_Bank = {
 }
 
 local frames = {}
+local function dashboardLabels(panel)
+    local labels = {}
+    for _, frame in ipairs(frames) do
+        local parent = frame
+        while parent and parent ~= panel do parent = parent.parent end
+        if parent == panel then
+            for _, label in ipairs(frame.fontStrings or {}) do labels[#labels + 1] = label end
+        end
+    end
+    return labels
+end
 _G.UIParent = {}
 _G.Minimap = {}
 _G.SlashCmdList = {}
@@ -106,8 +117,14 @@ _G.CreateFrame = function(frameType, name, parent, template)
         shown = false,
         scripts = {},
     }
-    function frame:SetSize() end
-    function frame:SetPoint() end
+    function frame:SetSize(w, h) self.width, self.height = w, h end
+    function frame:SetPoint(...) self.point = {...} end
+    function frame:ClearAllPoints() self.point = nil end
+    function frame:EnableMouseWheel(value) self.mouseWheel = value end
+    function frame:SetScrollChild(child) self.scrollChild = child end
+    function frame:SetVerticalScroll(offset) self.scrollOffset = offset end
+    function frame:GetVerticalScroll() return self.scrollOffset or 0 end
+    function frame:GetVerticalScrollRange() return 420 end
     function frame:SetFrameStrata() end
     function frame:SetMovable() end
     function frame:EnableMouse() end
@@ -140,8 +157,20 @@ _G.CreateFrame = function(frameType, name, parent, template)
     function frame:SetHighlightTexture(texture) self.highlightTexture = texture end
     function frame:CreateFontString()
         local fontString = {}
-        function fontString:SetPoint() end
+        function fontString:SetPoint(...) self.point = {...} end
+        function fontString:ClearAllPoints() self.point = nil end
+        function fontString:SetWidth(w) self.width = w end
+        function fontString:SetHeight(h) self.height = h end
+        function fontString:SetJustifyH(value) self.justify = value end
         function fontString:SetText(text) self.text = text end
+        function fontString:GetStringHeight()
+            local columns = math.max(1, math.floor((self.width or 200) / 7))
+            local lines = 0
+            for line in (tostring(self.text or "") .. "\n"):gmatch("(.-)\n") do
+                lines = lines + math.max(1, math.ceil(#line / columns))
+            end
+            return lines * 14
+        end
         function fontString:Show() self.shown = true end
         function fontString:Hide() self.shown = false end
         self.fontStrings = self.fontStrings or {}
@@ -158,6 +187,7 @@ _G.GameFontHighlight = {}
 _G.GameFontDisable = {}
 
 local chunk, loadError = loadfile(addonPath)
+assert(loadfile("../DashboardUI.lua"))()
 if not chunk then
     io.stderr:write("FAIL: addon loads: " .. tostring(loadError) .. "\n")
     os.exit(1)
@@ -1730,6 +1760,9 @@ if minimapButton and minimapButton.scripts.OnClick then
         if frame.name == "MclarionWowSettingsFrame" then panel = frame end
     end
     expectTrue(panel and panel:IsShown(), "minimap icon opens the addon settings")
+    expectTrue(type(MclarionWow_DashboardNavigate) == "function" and
+        type(MclarionWow_DashboardRefresh) == "function",
+        "dashboard exposes navigation and safe read-only refresh")
     minimapButton.scripts.OnClick(minimapButton)
     expectTrue(panel and not panel:IsShown(), "minimap icon closes the addon settings")
     local actionButtons = {}
@@ -2055,7 +2088,7 @@ if captureFrame then
             if frame.name == "MclarionWowSettingsFrame" then panel = frame end
         end
         local refused = false
-        for _, label in ipairs(panel.fontStrings) do
+        for _, label in ipairs(dashboardLabels(panel)) do
             if label.text and label.text:find("Bank: Capture unavailable", 1, true) then refused = true end
         end
         expectTrue(refused, "settings report a refused automatic bank snapshot")
@@ -2073,7 +2106,7 @@ if type(SlashCmdList.MCLARIONWOWUI) == "function" then
         if frame.name == "MclarionWowSettingsFrame" then panel = frame end
     end
     expectTrue(panel ~= nil and panel:IsShown(), "settings window can be opened in game")
-    expectTrue(panel and panel.fontStrings and #panel.fontStrings >= 4,
+    expectTrue(panel and #dashboardLabels(panel) >= 4,
         "settings window reports bank, item, bag and combat-log status")
     local settings = MclarionWowData.settings
     expectTrue(settings and settings.autoCombatLog and settings.autoCharacterCapture and
@@ -2100,7 +2133,7 @@ if type(SlashCmdList.MCLARIONWOWUI) == "function" then
         checkboxes[1].scripts.OnClick(checkboxes[1])
         expectEqual(combatLogging, true, "disabling auto-start never stops another source's logging")
         local function statusContains(message)
-            for _, label in ipairs(panel.fontStrings) do
+            for _, label in ipairs(dashboardLabels(panel)) do
                 if label.text and label.text:find(message, 1, true) then return true end
             end
             return false
@@ -2188,7 +2221,7 @@ if type(SlashCmdList.MCLARIONWOWUI) == "function" then
     autoStart.scripts.OnClick(autoStart)
     expectEqual(combatLogging, true, "switch-off after reload never guesses who started active logging")
     local attributedElsewhere = false
-    for _, label in ipairs(reloadedPanel.fontStrings) do
+    for _, label in ipairs(dashboardLabels(reloadedPanel)) do
         if label.text and label.text:find("other source", 1, true) then attributedElsewhere = true end
     end
     expectEqual(attributedElsewhere, false, "status never misattributes the logging source after reload")
@@ -2412,13 +2445,24 @@ for _, frame in ipairs(frames) do
     if frame.parent == actionPanel and frame.frameType == "Button" then actions[frame.text] = frame end
 end
 local function visibleStatus(text)
-    for _, label in ipairs(actionPanel.fontStrings) do
+    for _, label in ipairs(dashboardLabels(actionPanel)) do
         if label.text and label.text:find(text, 1, true) then return true end
     end
     return false
 end
-expectTrue(visibleStatus("Items now: bags + gear; Bank now: bank items if enabled."),
-    "settings explain which capture-now button updates each item source")
+local function bodyStatus(text)
+    for _, frame in ipairs(frames) do
+        if frame.frameType == "ScrollFrame" and frame.parent == actionPanel and frame.scrollChild then
+            for _, label in ipairs(frame.scrollChild.fontStrings or {}) do
+                if label.text and label.text:find(text, 1, true) then return true end
+            end
+        end
+    end
+    return false
+end
+expectTrue(MclarionWow_DashboardNavigate("items") and
+    bodyStatus("Items now (bags/gear), Bank now (bank details)"),
+    "item section explains which manual action updates each source")
 expectTrue(visibleStatus("Auto-capture works with this window closed"),
     "settings explain that the addon window need not remain open")
 local actionGuid = "Player-1234-ABCDEF12"
@@ -2757,20 +2801,20 @@ for _, frame in ipairs(frames) do
     end
 end
 expectEqual(#controls, 11, "four separate companion opt-in controls")
-local mainTab, moreTab
+local previousButton, nextButton
 for _, frame in ipairs(frames) do
-    if frame.parent == actionPanel and frame.text == "Main" then mainTab = frame end
-    if frame.parent == actionPanel and frame.text == "More captures" then moreTab = frame end
+    if frame.parent == actionPanel and frame.text == "Previous" then previousButton = frame end
+    if frame.parent == actionPanel and frame.text == "Next" then nextButton = frame end
 end
-expectTrue(mainTab ~= nil and moreTab ~= nil, "settings expose distinct readable pages")
-if mainTab and moreTab then
-    moreTab.scripts.OnClick(moreTab)
-    expectTrue(controls[8].shown and not controls[1].shown,
-        "companion page hides the legacy controls")
-    mainTab.scripts.OnClick(mainTab)
-    expectTrue(not controls[8].shown and controls[1].shown,
-        "main page restores legacy controls without overlap")
-end
+expectTrue(previousButton and nextButton and
+    MclarionWow_DashboardNavigate("gold") and controls[8].shown and not controls[1].shown,
+    "eleven sections expose navigation without overlapping controls")
+nextButton.scripts.OnClick(nextButton)
+expectTrue(controls[9].shown and not controls[8].shown,
+    "Next moves to the next category")
+previousButton.scripts.OnClick(previousButton)
+expectTrue(controls[8].shown and not controls[9].shown,
+    "Previous restores the category without another scan")
 for index=8,11 do
     controls[index]:SetChecked(true)
     controls[index].scripts.OnClick(controls[index])
@@ -2947,7 +2991,7 @@ SlashCmdList.MCLARIONWOWUI()
 for index=#frames,1,-1 do if frames[index].name=="MclarionWowSettingsFrame" then
     timingPanel=frames[index];break end end
 local function timingStatus(part)
-    for _,label in ipairs(timingPanel.fontStrings) do
+    for _,label in ipairs(dashboardLabels(timingPanel)) do
         if label.text and label.text:find(part,1,true) then return true end
     end
     return false
@@ -3045,7 +3089,7 @@ SlashCmdList.MCLARIONWOWUI()
 for i=#frames,1,-1 do if frames[i].name == "MclarionWowSettingsFrame" then
     retryPanel=frames[i]; break end end
 local function retryStatus(fragment)
-    for _, label in ipairs(retryPanel.fontStrings) do
+    for _, label in ipairs(dashboardLabels(retryPanel)) do
         if label.text and label.text:find(fragment, 1, true) then return true end
     end
     return false
