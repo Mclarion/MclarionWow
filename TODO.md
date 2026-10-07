@@ -1,6 +1,8 @@
-# MclarionWow handoff TODO — 2026-10-05
+# MclarionWow handoff TODO — 2026-10-07
 
-- [ ] Finish targeted rereview and package the 0.12.2 dashboard: labelled eleven-status index, direct section links, measured wrapped text, last-request labels and protected-summary guards. Parent verified 107 UI and 657 integration assertions on each Lua 5.1/5.4, plus two packaging tests after fixes. Earlier complete suite passed; fresh fixture generation is repaired and validated separately. Installed remains 0.12.1; player reports client 1.60.1.70245. Publish audited source and install only after stopped-client verification and paired backup/readback. Live rendering remains unverified.
+- [x] Completed reviewed 0.12.2 installation on stopped executable 1.60.1.70245: public runtime `a25bb711e9a67474a7137d4c16e00f7e0633207e`, nine installed/public hashes, both versions, four unchanged enabled-state files and complete 0.12.1 paired backup verified. UI113/integration657 each Lua5.1/5.4 and packaging2 passed; deterministic ZIP and paired Windows rollback tests passed. No player saves inspected.
+- [ ] Next normal-session check: open `/mhwowui`; verify labelled category/status index, section controls, explanations, triggers, stored counts and unclipped scrolling text. Live rendering remains pending; do not repeat migration probes.
+- [x] Offline 0.12.2 review and packaging completed, including protected summaries, direct section navigation, measured text and footer spacing. Fresh synthetic fixture generation is repaired and validated separately; installation verification is recorded above.
 - [x] Authorized 0.12.1 publication/install completed 6 October: runtime `4319e3d5a11ad91588b3b53a0230dc98ad8fd9ce`, seven public/installed file hashes, both versions, four enabled states and complete 0.12.0 paired backup independently verified with WoW stopped. No player save read or change.
 - [ ] Observe 0.12.1 event capture and rendered statuses during normal play; no repeated preflight and no need to manufacture PvP/title/currency changes. Earlier offline installation gates below are now complete; live validation remains pending.
 
