@@ -117,7 +117,10 @@ _G.CreateFrame = function(frameType, name, parent, template)
         shown = false,
         scripts = {},
     }
-    function frame:SetSize(w, h) self.width, self.height = w, h end
+    local width, height
+    function frame:SetSize(w, h) width, height = w, h end
+    function frame:GetWidth() return width end
+    function frame:GetHeight() return height end
     function frame:SetPoint(...) self.point = {...} end
     function frame:ClearAllPoints() self.point = nil end
     function frame:EnableMouseWheel(value) self.mouseWheel = value end
@@ -159,12 +162,15 @@ _G.CreateFrame = function(frameType, name, parent, template)
         local fontString = {}
         function fontString:SetPoint(...) self.point = {...} end
         function fontString:ClearAllPoints() self.point = nil end
-        function fontString:SetWidth(w) self.width = w end
-        function fontString:SetHeight(h) self.height = h end
+        local width, height
+        function fontString:SetWidth(w) width = w end
+        function fontString:SetHeight(h) height = h end
+        function fontString:GetWidth() return width end
+        function fontString:GetHeight() return height end
         function fontString:SetJustifyH(value) self.justify = value end
         function fontString:SetText(text) self.text = text end
         function fontString:GetStringHeight()
-            local columns = math.max(1, math.floor((self.width or 200) / 7))
+            local columns = math.max(1, math.floor((self:GetWidth() or 200) / 7))
             local lines = 0
             for line in (tostring(self.text or "") .. "\n"):gmatch("(.-)\n") do
                 lines = lines + math.max(1, math.ceil(#line / columns))

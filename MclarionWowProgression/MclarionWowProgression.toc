@@ -3,7 +3,7 @@
 ## Title: MclarionWowProgression
 ## Notes: Opt-in local quest, reputation, wealth, PvP and title observations; requires MclarionWow.
 ## Author: Mclarion
-## Version: 0.12.2-candidate
+## Version: 0.12.3-candidate
 ## Dependencies: MclarionWow
 ## SavedVariables: MclarionWowQuestData, MclarionWowReputationData, MclarionWowWealthData, MclarionWowHonorTitleData
 
