@@ -1,10 +1,12 @@
 # Vaultkeeper: current SavedVariables handoff
 
-## Branding candidate — 0.12.5 (not installed)
+## Current installation — Vaultkeeper 0.12.5-candidate
+
+Public runtime `733e3373d1119809089e280633cc09c5c443eec2` was anonymously matched to all eleven packaged files and installed with WoW stopped on executable 1.60.1.70245. Separate readback verified eleven installed hashes, both versions, four unchanged enabled-state files and complete paired 0.12.4 backup. ZIP `Vaultkeeper-0.12.5-candidate-reviewed.zip` SHA-256 `7baaba44d6ec73797400f2be0809ec87c756ee1e3eb2ba4a22e9f18cdee663b8`. UI/main Lua5.1/5.4 checks (661 main assertions each), four Python tests and Windows rollback checks passed. No player-save access; icon appearance awaits normal in-game inspection.
 
 Display titles are Vaultkeeper and Vaultkeeper Progression; new archives use the Vaultkeeper prefix. The existing supplied icon is packaged for the dashboard and minimap. `/vaultkeeper` and legacy `/mhwowui` open the same dashboard. Internal addon folders/TOCs and all SavedVariables globals and filenames retain their `MclarionWow` names for compatibility: no player data migration, capture change, consumer change or new import support is introduced.
 
-## Current installation — 0.12.4-candidate (7 October 2026)
+## Historical installation — 0.12.4-candidate (7 October 2026)
 
 Installed on stopped executable 1.60.1.70245 from public runtime `9d84fc9e5b3ae9c80ac9de6d0f2eccd7803f0da1`. Separate readback verified ten source/package/installed hashes, both versions, four unchanged enabled-state files and both retained 0.12.3 rollback folders. ZIP SHA-256 `e2634c2db85fd482364852caa7d728e378b156044beeec85f7d1e225c94dfe18`. UI/details/main Lua5.1/5.4 tests, two package tests and synthetic Windows paired rollback checks passed. No player saves inspected. Map-sized overview, ten aligned Scan actions, no Stop action, independent saved-detail scrolling; actual rendered-client fit remains pending.
 
