@@ -232,6 +232,9 @@ end
 expectTrue(minimapButton and minimapButton.parent == Minimap and
     minimapButton.frameType == "Button" and type(minimapButton.scripts.OnClick) == "function",
     "a clickable icon is attached to the minimap")
+expectEqual(minimapButton.normalTexture, "Interface\\AddOns\\MclarionWow\\VaultkeeperIcon.tga", "minimap uses supplied Vaultkeeper icon")
+expectEqual(SLASH_MCLARIONWOWUI2, "/vaultkeeper", "branded dashboard command")
+expectEqual(SLASH_MCLARIONWOWUI1, "/mhwowui", "legacy dashboard command retained")
 for _, command in ipairs({ "MCLARIONWOW", "MCLARIONWOWIDENTITY", "MCLARIONWOWBAGSEXPORT",
     "MCLARIONWOWITEMSEXPORT", "MCLARIONWOWBANKSEXPORT", "MCLARIONWOWBANKITEMSEXPORT" }) do
     expectEqual(SlashCmdList[command], nil, "manual copy command " .. command .. " is retired")
@@ -988,7 +991,7 @@ if type(MclarionWow_ProbeSavedSize) == "function" then
     print = function(message) printed = message end
     SlashCmdList.MCLARIONWOWSIZEPROBE()
     print = oldPrint
-    expectTrue(printed == "MclarionWow: Saved schema is unsupported." and
+    expectTrue(printed == "Vaultkeeper: Saved schema is unsupported." and
         printed:find("Player-", 1, true) == nil,
         "size slash refusal prints only a fixed non-identifying reason")
     local function loadFixtureEnvironment(path)

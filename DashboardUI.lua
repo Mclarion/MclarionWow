@@ -63,7 +63,10 @@ function MclarionWow_CreateDashboard(model)
   measure(text,value);return text
  end
  local fullWidth=math.max(1,width-36)
- label(panel,"GameFontNormalLarge",fullWidth,"Vaultkeeper | offline dashboard",18,-30)
+ local brand=CreateFrame("Button",nil,panel)
+ brand:SetSize(24,24);brand:SetPoint("TOPLEFT",18,-26);brand:EnableMouse(false)
+ brand:SetNormalTexture("Interface\\AddOns\\MclarionWow\\VaultkeeperIcon.tga")
+ label(panel,"GameFontNormalLarge",math.max(1,fullWidth-32),"Vaultkeeper | saved-data dashboard",50,-30)
  label(panel,"GameFontNormal",fullWidth,"Auto-capture runs with window closed; no upload. Select a category to inspect saved observations.",18,-54)
  local footer=label(panel,"GameFontNormal",fullWidth,"Saves at /reload or exit; memory != disk.",18,-height+40)
  footer:ClearAllPoints();footer:SetPoint("BOTTOMLEFT",18,35)

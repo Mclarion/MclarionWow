@@ -53,7 +53,7 @@ function MclarionWow_BuildExport()
     local combat, combatError = combatStatus()
     if combat == nil then return nil, combatError end
     if combat then
-        return nil, "MclarionWow will not export while you are in combat."
+        return nil, "Vaultkeeper will not export while you are in combat."
     end
     local apisAvailable, apiError = exportApisAvailable(GetServerTime, UnitGUID, UnitName,
         GetRealmName, UnitClass, UnitLevel, GetZoneText, GetBuildInfo, GetInventoryItemID)
@@ -1875,7 +1875,7 @@ local createSettingsWindow = function()
                 if not inWorld then setMessage(key,"Unavailable before world entry."); return end
                 local fn=_G[companionCategories[index][2]]
                 if isSecret(fn) or type(fn)~="function" then
-                    setMessage(key,"Companion addon unavailable; install/enable MclarionWowProgression."); return
+                    setMessage(key,"Companion addon unavailable; install/enable Vaultkeeper Progression."); return
                 end
                 local ok, stored, result=pcall(fn,true)
                 local outcome=classifyCompanionResult(ok,stored,result)
@@ -1892,6 +1892,7 @@ local createSettingsWindow = function()
 end
 
 SLASH_MCLARIONWOWUI1 = "/mhwowui"
+SLASH_MCLARIONWOWUI2 = "/vaultkeeper"
 SlashCmdList.MCLARIONWOWUI = function()
     if not settingsWindow then createSettingsWindow() end
     refreshSettingsStatus()
@@ -1905,7 +1906,7 @@ if not isSecret(Minimap) and type(Minimap) == "table" and not issecrettable(Mini
     button:SetSize(30, 30)
     button:SetPoint("BOTTOMLEFT", Minimap, "BOTTOMLEFT", -8, -8)
     button:SetFrameStrata("MEDIUM")
-    button:SetNormalTexture("Interface\\Icons\\INV_Misc_Map_01")
+    button:SetNormalTexture("Interface\\AddOns\\MclarionWow\\VaultkeeperIcon.tga")
     button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
     button:SetScript("OnClick", function()
         if settingsWindow and settingsWindow:IsShown() then
@@ -1919,49 +1920,49 @@ end
 SLASH_MCLARIONWOWBAGS1 = "/mhwowbags"
 SlashCmdList.MCLARIONWOWBAGS = function()
     local ok, report, err = pcall(MclarionWow_ProbeBags)
-    print("MclarionWow: " .. (ok and (report or err) or "Bag probe unavailable."))
+    print("Vaultkeeper: " .. (ok and (report or err) or "Bag probe unavailable."))
 end
 
 SLASH_MCLARIONWOWBANKPROBE1 = "/mhwowbankprobe"
 SlashCmdList.MCLARIONWOWBANKPROBE = function()
     local ok, report, err = pcall(MclarionWow_ProbeBank)
-    print("MclarionWow: " .. (ok and (report or err) or "Bank probe unavailable."))
+    print("Vaultkeeper: " .. (ok and (report or err) or "Bank probe unavailable."))
 end
 
 SLASH_MCLARIONWOWPROGRESSPROBE1 = "/mhwowprogressprobe"
 SlashCmdList.MCLARIONWOWPROGRESSPROBE = function()
     local ok, report, err = pcall(MclarionWow_ProbeProgression)
-    print("MclarionWow: " .. (ok and (report or err) or "Progression probe unavailable."))
+    print("Vaultkeeper: " .. (ok and (report or err) or "Progression probe unavailable."))
 end
 
 SLASH_MCLARIONWOWPROGRESSRECORDS1 = "/mhwowprogressrecords"
 SlashCmdList.MCLARIONWOWPROGRESSRECORDS = function()
     local ok, report, err = pcall(MclarionWow_ProbeProgressionRecords)
-    print("MclarionWow: " .. (ok and (report or err) or "Progression record probe unavailable."))
+    print("Vaultkeeper: " .. (ok and (report or err) or "Progression record probe unavailable."))
 end
 
 SLASH_MCLARIONWOWPROGRESSNAMESPACED1 = "/mhwowprogressnamespaced"
 SlashCmdList.MCLARIONWOWPROGRESSNAMESPACED = function()
     local ok, report, err = pcall(MclarionWow_ProbeProgressionNamespaced)
-    print("MclarionWow: " .. (ok and (report or err) or "Namespaced progression probe unavailable."))
+    print("Vaultkeeper: " .. (ok and (report or err) or "Namespaced progression probe unavailable."))
 end
 
 SLASH_MCLARIONWOWPROGRESSSAFETY1 = "/mhwowprogresssafety"
 SlashCmdList.MCLARIONWOWPROGRESSSAFETY = function()
     local ok, report, err = pcall(MclarionWow_ProbeProgressionSafety)
-    print("MclarionWow: " .. (ok and (report or err) or "Progression safety probe unavailable."))
+    print("Vaultkeeper: " .. (ok and (report or err) or "Progression safety probe unavailable."))
 end
 
 SLASH_MCLARIONWOWSIZEPROBE1 = "/mhwowsizeprobe"
 SlashCmdList.MCLARIONWOWSIZEPROBE = function()
     local ok, report, err = pcall(MclarionWow_ProbeSavedSize)
-    print("MclarionWow: " .. (ok and (report or err) or "Size probe unavailable."))
+    print("Vaultkeeper: " .. (ok and (report or err) or "Size probe unavailable."))
 end
 
 SLASH_MCLARIONWOWMIGRATIONPREFLIGHT1 = "/mhwowmigrationpreflight"
 SlashCmdList.MCLARIONWOWMIGRATIONPREFLIGHT = function()
     local ok, report, err = pcall(MclarionWow_ProbeSchema3Preflight)
-    print("MclarionWow: " .. (ok and (report or err) or "Migration preflight unavailable."))
+    print("Vaultkeeper: " .. (ok and (report or err) or "Migration preflight unavailable."))
 end
 
 local captureFrame = CreateFrame("Frame")

@@ -1,4 +1,10 @@
-# MclarionWow
+# Vaultkeeper
+
+## Branding candidate — 0.12.5 (not installed)
+
+Vaultkeeper and Vaultkeeper Progression are the visible addon names. New release archives use `Vaultkeeper-<version>-candidate-reviewed.zip`. The supplied Vaultkeeper emblem has source path `Assets/VaultkeeperIcon.tga`, is packaged as `MclarionWow/VaultkeeperIcon.tga`, and is used in the dashboard header and minimap button. `/vaultkeeper` opens the dashboard; `/mhwowui` remains compatible.
+
+The internal `MclarionWow` and `MclarionWowProgression` addon folders, TOC filenames, Lua APIs, SavedVariables globals and saved filenames are deliberately unchanged so the rename does not detach existing settings/history or break existing readers. This is branding only, not a save migration or a change to capture scope. Historical artifact names below remain accurate for those releases.
 
 ## Current installation — 0.12.4-candidate (7 October 2026)
 

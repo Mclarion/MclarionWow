@@ -1,4 +1,8 @@
-# MclarionWow: current SavedVariables handoff
+# Vaultkeeper: current SavedVariables handoff
+
+## Branding candidate — 0.12.5 (not installed)
+
+Display titles are Vaultkeeper and Vaultkeeper Progression; new archives use the Vaultkeeper prefix. The existing supplied icon is packaged for the dashboard and minimap. `/vaultkeeper` and legacy `/mhwowui` open the same dashboard. Internal addon folders/TOCs and all SavedVariables globals and filenames retain their `MclarionWow` names for compatibility: no player data migration, capture change, consumer change or new import support is introduced.
 
 ## Current installation — 0.12.4-candidate (7 October 2026)
 

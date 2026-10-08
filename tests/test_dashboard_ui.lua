@@ -20,6 +20,7 @@ function CreateFrame(kind,name,parent)
  function f:Show() self.shown=true end
  function f:Hide() self.shown=false end
  function f:SetText(t) self.text=t end
+ function f:SetNormalTexture(t) self.texture=t end
  function f:SetChecked(t) self.checked=t end
  function f:GetChecked() return self.checked end
  function f:EnableMouseWheel(t) self.wheel=t end
@@ -62,6 +63,11 @@ local function make(w,h)
  return panel,own,scrolls[1],scrolls[2]
 end
 local panel,own,index,body=make(1024,768)
+local brandFound=false
+for _,f in ipairs(own) do
+ if f.texture=="Interface\\AddOns\\MclarionWow\\VaultkeeperIcon.tga" then brandFound=true end
+end
+assert(brandFound,"supplied Vaultkeeper icon in dashboard header")
 assert(panel:GetWidth()>=960 and panel:GetWidth()<=996 and panel:GetHeight()>=700 and panel:GetHeight()<=740,"map-sized clamped panel")
 assert(panel.width==nil and panel.height==nil and index and body and index~=body,"private geometry and independent panes")
 assert(index:GetVerticalScrollRange()==0,"all eleven rows fit without category scrolling")

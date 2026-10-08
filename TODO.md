@@ -1,4 +1,7 @@
-# MclarionWow handoff TODO — 2026-10-07
+# Vaultkeeper handoff TODO
+
+- [x] Prepare 0.12.5 branding: Vaultkeeper display titles, supplied icon in dashboard/minimap, `/vaultkeeper` alias and Vaultkeeper-named release archive. Preserve internal addon/save names and all capture behavior.
+- [ ] Install branding candidate after source/package verification and stopped-client check; verify icon rendering in the next normal session. Installed baseline remains 0.12.4 until readback confirms upgrade.
 
 - [x] Published and installed 0.12.4 map-sized overview/details from runtime `9d84fc9e5b3ae9c80ac9de6d0f2eccd7803f0da1`: ten installed/public hashes, both versions, four unchanged enabled-state files and complete 0.12.3 paired backup verified with WoW stopped on 1.60.1.70245. UI/details/main tests on Lua5.1/5.4, packaging and paired Windows rollback tests passed. No player saves accessed.
 - [ ] Next normal session: verify `/mhwowui` overview and saved details render correctly. Latest validated values have a 32,768-byte explicit-truncation bound, not unlimited history display or additional capture coverage. Companion Download localhost remains UNDER DEVELOPMENT docs-only, pending policy clarification.

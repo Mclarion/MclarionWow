@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and validate the offline two-addon 0.12.4 candidate ZIP.
+"""Build and validate the Vaultkeeper two-addon 0.12.5 candidate ZIP.
 
 No player files, network, installation or consumer edits.
 """
@@ -8,6 +8,7 @@ from pathlib import Path
 import zipfile
 
 FILES = (
+    "MclarionWow/VaultkeeperIcon.tga",
     "MclarionWow/DashboardSummary.lua",
     "MclarionWow/DashboardDetails.lua",
     "MclarionWow/DashboardUI.lua",
@@ -50,7 +51,7 @@ def validate_archive(path):
             raise ValueError("archive must contain precisely the declared runtime files")
         main = archive.read("MclarionWow/MclarionWow.toc").decode("utf-8")
         extra = archive.read("MclarionWowProgression/MclarionWowProgression.toc").decode("utf-8")
-        if "## Version: 0.12.4-candidate" not in main or "## Version: 0.12.4-candidate" not in extra:
+        if "## Version: 0.12.5-candidate" not in main or "## Version: 0.12.5-candidate" not in extra:
             raise ValueError("candidate version mismatch")
         if saved_variables(main) != ["MclarionWowData"] or dependencies(main):
             raise ValueError("legacy save owner or dependency changed")
@@ -73,6 +74,7 @@ def validate_archive(path):
 def build(root, output):
     root, output = Path(root), Path(output)
     data = {
+        "MclarionWow/VaultkeeperIcon.tga": (root / "Assets" / "VaultkeeperIcon.tga").read_bytes(),
         "MclarionWow/DashboardSummary.lua": (root / "DashboardSummary.lua").read_bytes(),
         "MclarionWow/DashboardDetails.lua": (root / "DashboardDetails.lua").read_bytes(),
         "MclarionWow/DashboardUI.lua": (root / "DashboardUI.lua").read_bytes(),

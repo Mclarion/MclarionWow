@@ -24,6 +24,7 @@ class CandidatePackageTests(unittest.TestCase):
             with zipfile.ZipFile(output) as archive:
                 names = archive.namelist()
                 self.assertEqual(names, [
+                    "MclarionWow/VaultkeeperIcon.tga",
                     "MclarionWow/DashboardSummary.lua", "MclarionWow/DashboardDetails.lua", "MclarionWow/DashboardUI.lua",
                     "MclarionWow/MclarionWow.lua", "MclarionWow/MclarionWow.toc",
                     "MclarionWowProgression/MclarionWowProgression.toc",
@@ -38,8 +39,8 @@ class CandidatePackageTests(unittest.TestCase):
                 self.assertEqual(module.saved_variables(progression), ["MclarionWowQuestData", "MclarionWowReputationData", "MclarionWowWealthData", "MclarionWowHonorTitleData"])
                 self.assertEqual(module.dependencies(progression), ["MclarionWow"])
                 self.assertEqual(module.runtime_files(main), ["DashboardSummary.lua", "DashboardDetails.lua", "DashboardUI.lua", "MclarionWow.lua"])
-                self.assertIn("## Version: 0.12.4-candidate", main)
-                self.assertIn("## Version: 0.12.4-candidate", progression)
+                self.assertIn("## Version: 0.12.5-candidate", main)
+                self.assertIn("## Version: 0.12.5-candidate", progression)
                 self.assertEqual(module.runtime_files(progression), ["QuestCapture.lua", "ReputationCapture.lua", "WealthCapture.lua", "HonorTitleCapture.lua"])
                 for folder, toc in (("MclarionWow", main), ("MclarionWowProgression", progression)):
                     for script in module.runtime_files(toc):

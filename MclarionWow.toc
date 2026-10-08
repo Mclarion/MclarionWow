@@ -1,9 +1,9 @@
 ## Interface: 16001
 ## AllowLoadGameType: camelot
-## Title: MclarionWow
-## Notes: Opt-in Forever snapshots; quest controls require MclarionWowProgression.
+## Title: Vaultkeeper
+## Notes: Opt-in Forever snapshots; extended captures require Vaultkeeper Progression.
 ## Author: Mclarion
-## Version: 0.12.4-candidate
+## Version: 0.12.5-candidate
 ## SavedVariables: MclarionWowData
 
 DashboardSummary.lua
