@@ -78,7 +78,12 @@ ok,reason=MclarionWow_CaptureGold(false); eq(reason,"saved","gold automatic afte
 ok=MclarionWow_SetAutoGoldCapture(false); eq(ok,true,"gold opt out")
 ok=MclarionWow_CaptureGold(false); eq(ok,nil,"gold auto disabled")
 -- A currency row's documented isAccountWide flag controls storage destination.
+local metadataCalls=0
+MclarionWow_EnrichObserved=function(kind,ids,who,at,build)
+ metadataCalls=metadataCalls+1;eq(kind,"currency","metadata type");eq(ids[1],101,"character observed ID");eq(ids[2],202,"account observed ID");eq(who,owner,"observer");eq(build,70205,"build");return false
+end
 ok,reason=MclarionWow_CaptureCurrency(true)
+eq(metadataCalls,1,"optional metadata refusal does not block currency")
 eq(ok,true,"manual visible currency scan")
 eq(reason,"saved","currency saved")
 root=MclarionWowWealthData

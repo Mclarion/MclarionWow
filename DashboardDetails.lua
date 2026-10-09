@@ -71,18 +71,21 @@ local function wire(v,guid,tag,fields,size,build)
     not decimal(f[3],1,TIME) or not decimal(f[build or 5],1,MAX) then return nil end
  return tonumber(f[3]),f
 end
-local function history(records,cap,parse)
+local function history(records,cap,parse,requested)
  if records==nil then return nil,"no observation" end
  local n=list(records,cap,false)
  if not n then return nil,"unavailable" end
- local previous=0
+ local previous,parsed=0,{}
  for i=1,n do
-  local stamp=parse(rawget(records,i))
+  local stamp,value=parse(rawget(records,i))
   if not stamp or stamp<=previous then return nil,"unavailable" end
-  previous=stamp
+  previous=stamp;parsed[i]=value
  end
- local _,latest=parse(rawget(records,n))
- return n,latest
+ local index=n
+ if safe(requested) and type(requested)=="number" and requested==math.floor(requested) then
+  index=math.max(1,math.min(n,requested))
+ end
+ return n,parsed[index],parsed[index-1],index
 end
 -- Text from saved records is data, not WoW color/link/texture control syntax.
 local function display(s)
@@ -121,14 +124,68 @@ local function rows(text,sep,cap,parse)
  end
  return out
 end
-local function render(key,guid)
+local function render(key,guid,requested)
  local lines={}
  local function add(s) lines[#lines+1]=s end
- local function header(at,build,n)
-  add("Latest saved observation: server time "..at.."; build "..build..".")
-  if n then add(n.." retained observations (latest values below; not cumulative).") end
+ local count,selected
+ local function header(at,build,n,index)
+  count,selected=n,index
+  add((index==n and "Latest saved observation" or "Selected saved observation")..": server time "..at.."; build "..build..".")
+  add(n.." retained observations; Observation "..index.." of "..n.." (selected values below; not cumulative).")
  end
- if key=="character" or key=="bags" or key=="bank" then
+ local function delta(old,new)
+  if old==new then return "unchanged" end
+  return tostring(old).." -> "..tostring(new)
+ end
+ local function metadata(kind,id,build)
+  local fn=MclarionWow_MetadataLabel
+  if not safe(fn) or type(fn)~="function" then return "" end
+  local ok,name,description=pcall(fn,kind,id,tonumber(build),guid)
+  if not ok or not safe(name) or type(name)~="string" or #name>256 or #name==0 then return "" end
+  local suffix=" — "..display(name)
+  if safe(description) and type(description)=="string" and #description<=1024 and #description>0 then
+   suffix=suffix.."; "..display(description)
+  end
+  return suffix
+ end
+ local function changes(before,after,format,limit)
+  if not before then add("No earlier retained observation to compare.");return end
+  local a,b={},{}
+  for _,v in ipairs(before) do a[v.key]=v.quantity end
+  for _,v in ipairs(after) do b[v.key]=v.quantity end
+  local keys={}
+  for k in pairs(a) do keys[#keys+1]=k end
+  for k in pairs(b) do if a[k]==nil then keys[#keys+1]=k end end
+  table.sort(keys)
+  local changed=0
+  for _,k in ipairs(keys) do
+   if a[k]~=b[k] then
+    changed=changed+1
+    if changed<=limit then add(format(k)..": "..(a[k] or 0).." -> "..(b[k] or 0)) end
+   end
+  end
+  if changed==0 then add("No quantity changes between adjacent saved observations.") end
+  if changed>limit then add("[Truncated changes: "..(changed-limit).." additional changed entries omitted.]") end
+ end
+ if key=="spells" then
+  local fn=MclarionWow_MetadataSpellRows
+  local buildFn=GetBuildInfo
+  if not safe(fn) or type(fn)~="function" or not safe(buildFn) or type(buildFn)~="function" then return "unavailable" end
+  local ok,_,build=pcall(buildFn)
+  if not ok or not safe(build) or type(build)~="string" or not build:match("^[1-9]%d*$") then return "unavailable" end
+  local yes,rows=pcall(fn,tonumber(build),guid)
+  if not yes or not plain(rows) or #rows>400 then return "unavailable" end
+  add("Observed successful player-spellcast IDs only; not learned spells, cast history, effects or damage. Descriptions are contextual to observer/build/locale.")
+  for _,r in ipairs(rows) do
+   if not plain(r) or not safe(r.id) or not safe(r.name) or not safe(r.description) or
+    type(r.id)~="number" or type(r.name)~="string" or #r.name>256 or
+    (r.description~=nil and (type(r.description)~="string" or #r.description>1024)) then return "unavailable" end
+   local line="spell ID "..r.id.." — "..display(r.name)
+   if r.description and r.description~="" then line=line.."; contextual description: "..display(r.description) end
+   add(line)
+  end
+  if #rows==0 then add("No observed spell metadata for this observer/build/locale.") end
+ elseif key=="character" or key=="bags" or key=="bank" then
   local map=legacy(key=="character" and "characters" or key)
   if not map then return "unavailable" end
   local function parse(record)
@@ -160,13 +217,13 @@ local function render(key,guid)
      if key=="bags" then
       local a,b=part:match("^([^:]+):([^:]+)$")
       local id,q=decimal(a,1,MAX),decimal(b,1,BIG)
-      if id and q then return "item ID "..id..": "..q,id end
+      if id and q then return {id=id,quantity=q,key=id},id end
      else
       local a,b,c=part:match("^([^:]+):([^:]+):([^:]+)$")
       local tab,id,q=decimal(a,6,14),decimal(b,1,MAX),decimal(c,1,BIG)
       if tab and id and q and (tab>previousTab or (tab==previousTab and id>previousId)) then
        previousTab,previousId=tab,id
-       return {tab=tab,id=id,quantity=q}
+       return {tab=tab,id=id,quantity=q,key=tab*2147483648+id}
       end
      end
     end)
@@ -175,19 +232,31 @@ local function render(key,guid)
    end
    return at,out
   end
-  local n,latest=history(rawget(map,guid),20,parse)
+  local n,latest,earlier,index=history(rawget(map,guid),20,parse,requested)
   if not n then return latest end
-  header(latest.at,latest.build,n)
+  header(latest.at,latest.build,n,index)
   if key=="character" then
    add("Name "..latest.name.."; realm "..latest.realm.."; class "..latest.class.."; level "..latest.level.."; map ID "..latest.map.."; zone "..latest.zone..".")
    add("Faction / race / gender: "..(latest.identity or "not captured in MHWOW1")..".")
    for i,id in ipairs(latest.gear) do add("Equipped slot "..i..": "..(id==0 and "empty" or "item ID "..id)..".") end
+   if earlier then
+    add("Adjacent saved changes: level "..delta(earlier.level,latest.level).."; zone "..delta(earlier.zone,latest.zone).."; map ID "..delta(earlier.map,latest.map)..".")
+    for i,id in ipairs(latest.gear) do
+     if id~=earlier.gear[i] then add("Equipped slot "..i..": "..(earlier.gear[i]==0 and "empty" or "item ID "..earlier.gear[i]).." -> "..(id==0 and "empty" or "item ID "..id)..".") end
+    end
+   else add("No earlier retained observation to compare.") end
   elseif key=="bags" then
    add("Own bags: aggregated IDs and quantities, not slots. "..#latest.entries.." item types.")
-   for _,v in ipairs(latest.entries) do add(v) end
+   for _,v in ipairs(latest.entries) do add("item ID "..v.id..": "..v.quantity) end
+   add("Adjacent bag quantity changes (not acquisition events):")
+   changes(earlier and earlier.entries,latest.entries,function(k)return "item ID "..k end,64)
   else
    add("Own character bank: aggregated IDs and quantities by tab; empty tabs not encoded.")
    for _,v in ipairs(latest.entries) do add("tab "..v.tab.." item ID "..v.id..": "..v.quantity) end
+   add("Adjacent character-bank quantity changes (not transfers):")
+   changes(earlier and earlier.entries,latest.entries,function(k)
+    local tab=math.floor(k/2147483648);return "tab "..tab.." item ID "..(k-tab*2147483648)
+   end,64)
   end
  elseif key=="items" then
   local map=legacy("items")
@@ -225,7 +294,7 @@ local function render(key,guid)
   else
    local m=metadata(bag)
    if not m then add("Bags/gear metadata: unavailable.") else
-    add("Bags/gear metadata latest saved: server time "..m.at.."; build "..m.build.."; locale "..m.locale.."; "..#m.entries.." cached IDs.")
+    add("Bags/gear metadata latest-only (not historical item names): server time "..m.at.."; build "..m.build.."; locale "..m.locale.."; "..#m.entries.." cached IDs.")
     for _,v in ipairs(m.entries) do add(v) end
    end
   end
@@ -237,7 +306,7 @@ local function render(key,guid)
     for i=1,n do pages[i]=metadata(rawget(bank,i));if not pages[i] then break end end
     if #pages~=n then add("Bank metadata: unavailable.") else
      for i,page in ipairs(pages) do
-      add("Bank metadata page "..i.." latest saved: server time "..page.at.."; build "..page.build.."; locale "..page.locale.."; "..#page.entries.." cached IDs (page is not a bank tab).")
+      add("Bank metadata page "..i.." latest-only (not historical item names): server time "..page.at.."; build "..page.build.."; locale "..page.locale.."; "..#page.entries.." cached IDs (page is not a bank tab).")
       for _,v in ipairs(page.entries) do add(v) end
      end
     end
@@ -266,7 +335,7 @@ local function render(key,guid)
     local prior=0
     for _,p in ipairs(parts) do
      local id
-     if q then id=decimal(p,1,MAX);out[#out+1]="active quest ID "..(id or "?")
+     if q then id=decimal(p,1,MAX);out[#out+1]={id=id}
      else
       local v=split(p,":",5)
       if not v or #v~=5 then return nil end
@@ -274,7 +343,7 @@ local function render(key,guid)
       local standing=decimal(v[2],1,16)
       local minimum,maximum,value=signed(v[3]),signed(v[4]),signed(v[5])
       if not standing or not minimum or not maximum or not value or minimum>=maximum or value<minimum or value>maximum then return nil end
-      out[#out+1]="faction ID "..(id or "?")..": standing "..standing.."; minimum "..minimum.."; maximum "..maximum.."; value "..value
+      out[#out+1]={id=id,standing=standing,minimum=minimum,maximum=maximum,value=value}
      end
      if not id or id<=prior then return nil end
      prior=id
@@ -282,12 +351,40 @@ local function render(key,guid)
    elseif leaves~=0 then return nil end
    return at,{at=at,build=f[5],rows=count,leaves=leaves,headers=h,collapsed=c,entries=out}
   end
-  local n,m=history(rawget(map,guid),20,parse)
+  local n,m,earlier,index=history(rawget(map,guid),20,parse,requested)
   if not n then return m end
-  header(m.at,m.build,n)
+  header(m.at,m.build,n,index)
   add(q and ("Active quest IDs only; "..m.rows.." UI rows; "..m.leaves.." active leaves (not completion history).") or
    ("Visible character-provenance faction leaves only; "..m.rows.." UI rows; "..m.leaves.." leaves; headers "..m.headers.."; collapsed "..m.collapsed.." (partial view)."))
-  for _,v in ipairs(m.entries) do add(v) end
+  for _,v in ipairs(m.entries) do
+   if q then add("active quest ID "..v.id)
+   else add("faction ID "..v.id..metadata("reputation",v.id,m.build)..": standing "..v.standing.."; minimum "..v.minimum.."; maximum "..v.maximum.."; value "..v.value) end
+  end
+  if not earlier then add("No earlier retained observation to compare.")
+  elseif q then
+   local old,new={},{}
+   for _,v in ipairs(earlier.entries) do old[v.id]=true end
+   for _,v in ipairs(m.entries) do new[v.id]=true end
+   add("Adjacent active quest-log ID changes (not completion or abandonment):")
+   local shown=0
+   for _,v in ipairs(m.entries) do if not old[v.id] then shown=shown+1;if shown<=64 then add("active quest ID "..v.id.." added") end end end
+   for _,v in ipairs(earlier.entries) do if not new[v.id] then shown=shown+1;if shown<=64 then add("active quest ID "..v.id.." no longer observed") end end end
+   if shown==0 then add("No active ID changes.") end
+   if shown>64 then add("[Truncated changes: "..(shown-64).." additional IDs omitted.]") end
+  else
+   add("Adjacent visible reputation differences: only IDs observed in both (Partial view; absent factions are not inferred).")
+   local old={};for _,v in ipairs(earlier.entries) do old[v.id]=v end
+   local changed=0
+   for _,v in ipairs(m.entries) do
+    local prior=old[v.id]
+    if prior and (prior.standing~=v.standing or prior.value~=v.value or prior.minimum~=v.minimum or prior.maximum~=v.maximum) then
+     changed=changed+1
+     if changed<=64 then add("faction ID "..v.id..": standing "..delta(prior.standing,v.standing).."; value "..delta(prior.value,v.value).."; range "..prior.minimum.."-"..prior.maximum.." -> "..v.minimum.."-"..v.maximum) end
+    end
+   end
+   if changed==0 then add("No differing intersecting faction IDs.") end
+   if changed>64 then add("[Truncated changes: "..(changed-64).." additional IDs omitted.]") end
+  end
  elseif key=="gold" or key=="currency" then
   local r=MclarionWowWealthData
   local map=root(r,"characters",1)
@@ -315,24 +412,42 @@ local function render(key,guid)
     if not plain(entry) then return nil end
     local id,q=rawget(entry,"id"),rawget(entry,"quantity")
     if not number(id,1,MAX) or id<=prev or not number(q,0,BIG) then return nil end
-    prev=id;out[#out+1]="currency ID "..id..": "..q
+    prev=id;out[#out+1]={id=id,quantity=q}
    end
    return at,{at=at,build=build,rows=rows,entries=out,observer=observer}
   end
   local records=group and rawget(group,key=="gold" and "gold" or "currency")
-  local n,m=history(records,20,function(v)return parse(v,false) end)
+  local n,m,earlier,index=history(records,20,function(v)return parse(v,false) end,requested)
   if key=="gold" then
    if not n then return m end
-   header(m.at,m.build,n)
+   header(m.at,m.build,n,index)
    local c=m.copper
    add("Current saved balance: "..c.." copper ("..math.floor(c/10000).."g "..math.floor(c%10000/100).."s "..(c%100).."c). Not transactions.")
+   if earlier then local diff=c-earlier.copper;add("Balance difference: "..(diff>0 and "+" or "")..diff.." copper between adjacent saved observations; not transactions.")
+   else add("No earlier retained observation to compare.") end
   else
    local function section(title,count,record)
     if not count then add(title..": "..record..".");return end
-    add(title..": "..count.." retained observations; latest server time "..record.at.."; build "..record.build.."; visible UI rows "..record.rows.."; "..#record.entries.." captured balances (partial view).")
-    for _,v in ipairs(record.entries) do add(v) end
+    add(title..": "..count.." retained "..(count==1 and "observation" or "observations").."; "..(title=="Character currency" and "selected" or "latest").." server time "..record.at.."; build "..record.build.."; visible UI rows "..record.rows.."; "..#record.entries.." captured balances (partial view).")
+    for _,v in ipairs(record.entries) do add("currency ID "..v.id..metadata("currency",v.id,record.build)..": "..v.quantity) end
    end
+   if n then header(m.at,m.build,n,index) end
    section("Character currency",n,m)
+   if n then
+    if not earlier then add("No earlier retained observation to compare.")
+    else
+     add("Adjacent character currency differences: only IDs observed in both (partial visible UI; absent currencies are not inferred).")
+     local prior={};for _,v in ipairs(earlier.entries) do prior[v.id]=v.quantity end
+     local changed=0
+     for _,v in ipairs(m.entries) do
+      if prior[v.id] and prior[v.id]~=v.quantity then
+       changed=changed+1;if changed<=64 then add("currency ID "..v.id..": "..prior[v.id].." -> "..v.quantity) end
+      end
+     end
+     if changed==0 then add("No differing intersecting currency IDs.") end
+     if changed>64 then add("[Truncated changes: "..(changed-64).." additional IDs omitted.]") end
+    end
+   end
    local account=rawget(r,"accountCurrency")
    local size=list(account,20,true)
    if not size then add("Account-wide currency: unavailable.")
@@ -341,7 +456,15 @@ local function render(key,guid)
     local count,latest=history(account,20,function(v)return parse(v,true) end)
     if not count then add("Account-wide currency: unavailable.")
     elseif latest.observer~=guid then add("Account-wide currency: unavailable (latest observed by other character).")
-    else section("Account-wide currency (observed by current character)",count,latest) end
+    else
+     local observed=0
+     for i=1,count do
+      local _,entry=parse(rawget(account,i),true)
+      if entry.observer==guid then observed=observed+1 end
+     end
+     add("Account-wide currency is independently latest-only; not selected character currency history.")
+     section("Account-wide currency (observed by current character)",observed,latest)
+    end
    end
   end
  elseif key=="honor" or key=="title" then
@@ -379,23 +502,40 @@ local function render(key,guid)
    end
    return at,m
   end
-  local n,m=history(rawget(group,key),20,parse)
+  local n,m,earlier,index=history(rawget(group,key),20,parse,requested)
   if not n then return m end
-  header(m.at,m.build,n)
+  header(m.at,m.build,n,index)
   if key=="honor" then
    local names={"lifetime honorable kills","max PvP rank","session honorable kills","session dishonorable kills","yesterday honorable kills","yesterday dishonorable kills","faction-2800 renown level","faction-2800 reputation earned","faction-2800 level threshold","faction-2800 max level"}
    for i=6,15 do add(names[i-5].." "..m.values[i]) end
    add("Supported captured counters only; not total honor earned or a kill ledger.")
+   if earlier then
+    add("Adjacent saved counter differences (not earned-honor events):")
+    local changed=0
+    for i=6,15 do if m.values[i]~=earlier.values[i] then changed=changed+1;add(names[i-5]..": "..earlier.values[i].." -> "..m.values[i]) end end
+    if changed==0 then add("No counter changes.") end
+   end
   else
    add("Known title IDs: "..(#m.ids==0 and "none" or table.concat(m.ids,", "))..".")
    add(m.selected==0 and "No title selected." or "Selected title ID "..m.selected..".")
    add("No acquisition dates captured.")
+   if earlier then
+    add("Adjacent selected title ID: "..delta(earlier.selected,m.selected)..". Known IDs are observations, not acquisition dates.")
+    local old,new={},{}
+    for _,id in ipairs(earlier.ids) do old[id]=true end
+    for _,id in ipairs(m.ids) do new[id]=true end
+    local changed=0
+    for _,id in ipairs(m.ids) do if not old[id] then changed=changed+1;if changed<=64 then add("Known title ID "..id.." newly observed") end end end
+    for _,id in ipairs(earlier.ids) do if not new[id] then changed=changed+1;if changed<=64 then add("Known title ID "..id.." no longer observed") end end end
+    if changed>64 then add("[Truncated changes: "..(changed-64).." additional IDs omitted.]") end
+   end
   end
+  if not earlier then add("No earlier retained observation to compare.") end
  end
- return lines
+ return lines,count,selected
 end
-local allowed={character=true,bags=true,bank=true,items=true,combat=true,quest=true,reputation=true,gold=true,currency=true,honor=true,title=true}
-local function details(key)
+local allowed={character=true,bags=true,bank=true,items=true,combat=true,quest=true,reputation=true,gold=true,currency=true,honor=true,title=true,spells=true}
+local function details(key,requested)
  if not safe(key) or type(key)~="string" or #key>20 or not allowed[key] then return "Details unavailable." end
  if key=="combat" then return "Combat: native WoW file; no addon observations, event records or saved count. Only the auto-start preference is stored." end
  if type(issecretvalue)~="function" or type(issecrettable)~="function" then return key..": unavailable" end
@@ -403,7 +543,7 @@ local function details(key)
  if not safe(fn) or type(fn)~="function" then return key..": unavailable" end
  local ok,guid=pcall(fn,"player")
  if not ok or not owner(guid) then return key..": unavailable" end
- local result=render(key,guid)
+ local result,count,selected=render(key,guid,requested)
  if type(result)=="string" then return key..": "..result end
  local out,used={},0
  local notice="\n[Truncated at 32768 bytes; additional saved values omitted.]"
@@ -413,14 +553,14 @@ local function details(key)
   if used+#part>LIMIT then
    while #out>0 and used+#notice>LIMIT do used=used-#out[#out];out[#out]=nil end
    if #out==0 then return key..": unavailable" end
-   return table.concat(out)..notice
+   return table.concat(out)..notice,count,selected
   end
   out[#out+1]=part;used=used+#part
  end
- return #out==0 and key..": no observation" or table.concat(out)
+ return #out==0 and key..": no observation" or table.concat(out),count,selected
 end
-function MclarionWow_DashboardDetails(key)
- local ok,result=pcall(details,key)
+function MclarionWow_DashboardDetails(key,requested)
+ local ok,result,count,selected=pcall(details,key,requested)
  if not ok or type(result)~="string" or #result>LIMIT then return "Details unavailable." end
- return result
+ return result,count,selected
 end

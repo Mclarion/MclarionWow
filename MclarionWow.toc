@@ -3,7 +3,7 @@
 ## Title: Vaultkeeper
 ## Notes: Opt-in Forever snapshots; extended captures require Vaultkeeper Progression.
 ## Author: Mclarion
-## Version: 0.12.5-candidate
+## Version: 0.12.6-candidate
 ## SavedVariables: MclarionWowData
 
 DashboardSummary.lua

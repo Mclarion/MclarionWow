@@ -1,0 +1,11 @@
+## Interface: 16001
+## AllowLoadGameType: camelot
+## Title: Vaultkeeper Metadata
+## Notes: Optional offline observed-ID metadata; requires Vaultkeeper Progression.
+## Author: Mclarion
+## Version: 0.12.6-candidate
+## Dependencies: MclarionWowProgression
+## SavedVariables: VaultkeeperMetadataData
+
+MetadataCapture.lua
+SpellEvents.lua

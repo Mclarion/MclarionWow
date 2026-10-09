@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and validate the Vaultkeeper two-addon 0.12.5 candidate ZIP.
+"""Build and validate the Vaultkeeper three-addon 0.12.6 candidate ZIP.
 
 No player files, network, installation or consumer edits.
 """
@@ -16,6 +16,9 @@ FILES = (
     "MclarionWow/MclarionWow.toc",
     "MclarionWowProgression/MclarionWowProgression.toc",
     "MclarionWowProgression/QuestCapture.lua",
+    "VaultkeeperMetadata/VaultkeeperMetadata.toc",
+    "VaultkeeperMetadata/MetadataCapture.lua",
+    "VaultkeeperMetadata/SpellEvents.lua",
     "MclarionWowProgression/ReputationCapture.lua",
     "MclarionWowProgression/WealthCapture.lua",
     "MclarionWowProgression/HonorTitleCapture.lua",
@@ -51,14 +54,18 @@ def validate_archive(path):
             raise ValueError("archive must contain precisely the declared runtime files")
         main = archive.read("MclarionWow/MclarionWow.toc").decode("utf-8")
         extra = archive.read("MclarionWowProgression/MclarionWowProgression.toc").decode("utf-8")
-        if "## Version: 0.12.5-candidate" not in main or "## Version: 0.12.5-candidate" not in extra:
+        if field(main, "Version") != ["0.12.6-candidate"] or field(extra, "Version") != ["0.12.6-candidate"]:
             raise ValueError("candidate version mismatch")
         if saved_variables(main) != ["MclarionWowData"] or dependencies(main):
             raise ValueError("legacy save owner or dependency changed")
         if saved_variables(extra) != ["MclarionWowQuestData", "MclarionWowReputationData", "MclarionWowWealthData", "MclarionWowHonorTitleData"] or dependencies(extra) != ["MclarionWow"]:
-            raise ValueError("progression must own all four companion data roots and require legacy addon")
+            raise ValueError("progression must own its four companion data roots and require legacy addon")
+        metadata = archive.read("VaultkeeperMetadata/VaultkeeperMetadata.toc").decode("utf-8")
+        if saved_variables(metadata) != ["VaultkeeperMetadataData"] or dependencies(metadata) != ["MclarionWowProgression"] or field(metadata, "Version") != ["0.12.6-candidate"]:
+            raise ValueError("metadata must own a separate file and depend on progression")
         for folder, toc, expected in (("MclarionWow", main, ["DashboardSummary.lua", "DashboardDetails.lua", "DashboardUI.lua", "MclarionWow.lua"]),
-                                       ("MclarionWowProgression", extra, ["QuestCapture.lua", "ReputationCapture.lua", "WealthCapture.lua", "HonorTitleCapture.lua"])):
+                                       ("MclarionWowProgression", extra, ["QuestCapture.lua", "ReputationCapture.lua", "WealthCapture.lua", "HonorTitleCapture.lua"]),
+                                       ("VaultkeeperMetadata", metadata, ["MetadataCapture.lua", "SpellEvents.lua"])):
             if runtime_files(toc) != expected:
                 raise ValueError("unexpected or missing runtime script for " + folder)
             for script in runtime_files(toc):
@@ -83,6 +90,9 @@ def build(root, output):
         "MclarionWowProgression/MclarionWowProgression.toc":
             (root / "MclarionWowProgression" / "MclarionWowProgression.toc").read_bytes(),
         "MclarionWowProgression/QuestCapture.lua": (root / "QuestCapture.lua").read_bytes(),
+        "VaultkeeperMetadata/VaultkeeperMetadata.toc": (root / "VaultkeeperMetadata" / "VaultkeeperMetadata.toc").read_bytes(),
+        "VaultkeeperMetadata/MetadataCapture.lua": (root / "VaultkeeperMetadata" / "MetadataCapture.lua").read_bytes(),
+        "VaultkeeperMetadata/SpellEvents.lua": (root / "VaultkeeperMetadata" / "SpellEvents.lua").read_bytes(),
         "MclarionWowProgression/ReputationCapture.lua": (root / "ReputationCapture.lua").read_bytes(),
         "MclarionWowProgression/WealthCapture.lua": (root / "WealthCapture.lua").read_bytes(),
         "MclarionWowProgression/HonorTitleCapture.lua": (root / "HonorTitleCapture.lua").read_bytes(),

@@ -122,4 +122,15 @@ local roots={MclarionWowData,MclarionWowQuestData,MclarionWowReputationData,Mcla
 for _,key in ipairs({"character","bags","bank","items","combat","quest","reputation","gold","currency","honor","title"}) do check(key,{}) end
 assert(MclarionWowData==roots[1] and MclarionWowQuestData==roots[2] and MclarionWowReputationData==roots[3] and MclarionWowWealthData==roots[4] and MclarionWowHonorTitleData==roots[5])
 assert(not _G.MclarionWow_DashboardSummary("invalid-key"):find("Player%-"))
+check("spells",{"metadata addon unavailable"})
+assert(loadfile("../VaultkeeperMetadata/MetadataCapture.lua"))()
+GetLocale=function() return "enUS" end
+GetBuildInfo=function() return "1.60.1","70205" end
+VaultkeeperMetadataData={schema=1,records={
+ ["spell:116:70205:enUS:"..A]={entityType="spell",id=116,build=70205,locale="enUS",observedAt=101,
+ observedBy=A,scope="character",name="Spell",description="Text",iconFileID=1234,
+ descriptionProvenance="player-spellcast:C_Spell.GetSpellDescription"}}}
+check("spells",{"1 cast-observed labels", "no cast history"})
+GetBuildInfo=function() return "1.60.1","70245" end
+check("spells",{"0 cast-observed labels"})
 print("Dashboard summary synthetic tests passed")

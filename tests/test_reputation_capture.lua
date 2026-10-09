@@ -49,7 +49,12 @@ eq(MclarionWowReputationData, nil, "load has no write")
 local ok, reason = MclarionWow_CaptureReputation(false)
 eq(ok, nil, "auto capture requires opt-in")
 eq(MclarionWowReputationData, nil, "auto-off no root")
+local metadataCalls=0
+MclarionWow_EnrichObserved=function(kind,ids,guid,at,build)
+ metadataCalls=metadataCalls+1;eq(kind,"reputation","metadata type");eq(ids[1],100,"metadata observed ID");eq(ids[2],200,"metadata observed ID 2");eq(guid,UnitGUID("player"),"metadata owner");eq(build,70205,"metadata build");return false
+end
 ok, reason = MclarionWow_CaptureReputation(true)
+eq(metadataCalls,1,"optional enrichment attempted without blocking numeric")
 eq(ok, true, "manual capture")
 eq(reason, "saved", "manual saved")
 local wire = "MHWOWR1|forever|1720000000|" .. guid ..

@@ -1102,10 +1102,10 @@ local function companionBudget(which, candidate)
     if combatStatus() ~= false then return nil end
     local roots = { MclarionWowData, MclarionWowQuestData,
         MclarionWowReputationData, MclarionWowWealthData,
-        MclarionWowHonorTitleData }
+        MclarionWowHonorTitleData, VaultkeeperMetadataData }
     roots[which] = candidate
     local total = 0
-    for index = 1, 5 do
+    for index = 1, 6 do
         local root = roots[index]
         -- Check nil too: a client protection shim can classify nil as secret.
         if isSecret(root) then return nil end
@@ -1122,6 +1122,7 @@ function MclarionWow_QuestStorageBudget(candidate) return companionBudget(2, can
 function MclarionWow_ReputationStorageBudget(candidate) return companionBudget(3, candidate) end
 function MclarionWow_WealthStorageBudget(candidate) return companionBudget(4, candidate) end
 function MclarionWow_HonorTitleStorageBudget(candidate) return companionBudget(5, candidate) end
+function MclarionWow_MetadataStorageBudget(candidate) return companionBudget(6, candidate) end
 
 -- Build an isolated schema-3 skeleton from the current schema-2 root. This is
 -- a dry run only: progression stays empty, both future capture flags stay off,

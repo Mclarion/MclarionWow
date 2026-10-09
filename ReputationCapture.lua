@@ -187,9 +187,10 @@ local function scan()
     end
     table.sort(entries, function(a, b) return a.id < b.id end)
     local wireEntries = {}
-    for i, leaf in ipairs(entries) do wireEntries[i] = leaf.entry end
+    local observedIDs = {}
+    for i, leaf in ipairs(entries) do wireEntries[i] = leaf.entry; observedIDs[i] = leaf.id end
     return {rows = visible, leaves = #entries, headerRep = headerRep,
-        collapsed = collapsedHeaders, entries = table.concat(wireEntries, ";")}
+        collapsed = collapsedHeaders, entries = table.concat(wireEntries, ";"), ids = observedIDs}
 end
 local function context()
     local combat = InCombatLockdown
@@ -274,6 +275,10 @@ local function capture(manual)
         return nil, "Automatic reputation capture is off." end
     local view, scanReason = scan()
     if not view then return nil, scanReason end
+    local function enrich()
+        local fn = MclarionWow_EnrichObserved
+        if not secret(fn) and type(fn) == "function" then pcall(fn, "reputation", view.ids, owner, stamp, build) end
+    end
     local record = table.concat({"MHWOWR1", "forever", tostring(stamp), owner,
         tostring(build), "visible-ui", tostring(view.rows), tostring(view.leaves),
         tostring(view.headerRep), tostring(view.collapsed), view.entries}, "|")
@@ -283,8 +288,8 @@ local function capture(manual)
     if previous then
         local priorStamp, priorState = parseRecord(previous[#previous], owner)
         if not priorStamp then return nil, "Reputation history format refused." end
-        if state == priorState then return true, "unchanged" end
-        if stamp <= priorStamp then return true, "same-second" end
+        if state == priorState then enrich(); return true, "unchanged" end
+        if stamp <= priorStamp then enrich(); return true, "same-second" end
     elseif owners >= 256 then return nil, "Reputation owner limit reached." end
     local stillOwner, _, _, checkReason = context()
     if not stillOwner or stillOwner ~= owner then
@@ -296,6 +301,7 @@ local function capture(manual)
     if not validate(root) or not budget(root) or not validate(root) then
         return nil, "Reputation storage budget refused." end
     MclarionWowReputationData = root
+    enrich()
     return true, "saved"
 end
 function MclarionWow_CaptureReputation(manual)

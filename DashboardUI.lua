@@ -1,6 +1,6 @@
 -- Data-first offline dashboard. Opening, selecting and refreshing never scans.
-local keys={"combat","character","bags","bank","items","quest","reputation","gold","currency","honor","title"}
-local names={"Combat log","Character","Bags","Character bank","Item details","Quests","Reputation","Gold","Currencies","Honor","Titles"}
+local keys={"combat","character","bags","bank","items","quest","reputation","gold","currency","honor","title","spells"}
+local names={"Combat log","Character","Bags","Character bank","Item details","Quests","Reputation","Gold","Currencies","Honor","Titles","Spells"}
 local scopes={
  "WoW writes its combat-log file. This addon keeps no combat events or record count.",
  "Own identity, gear, level and location; not every past state.",
@@ -13,6 +13,7 @@ local scopes={
  "Visible currency list only; not hidden currencies or acquisition history.",
  "Supported visible PvP counters only; not a full match history.",
  "Selected/known title observation; not acquisition history.",
+ "Optional cast-observed spell labels; no cast history, learned list or combat payloads.",
 }
 local triggers={
  "Auto-start at world entry if opted in. Turning off auto-start does not stop logging already active.",
@@ -26,6 +27,7 @@ local triggers={
  "World entry, post-combat, currency updates; every 5 minutes and bounded retry. Manual Scan out of combat.",
  "World entry, post-combat, PvP-rank updates; every 5 minutes and bounded retry. Manual Scan out of combat.",
  "World entry and post-combat; every 5 minutes and bounded retry. Manual Scan out of combat.",
+ "Explicit /vkmspells on consent; player successful spellcast IDs queued, enriched out of combat. /vkmspells off stops collection.",
 }
 local function safeRead(name,key,limit,fallback)
  if type(issecretvalue)~="function" then return fallback end
@@ -37,6 +39,25 @@ local function safeRead(name,key,limit,fallback)
  ok,secret=pcall(issecretvalue,value)
  if not ok or secret or type(value)~="string" or #value>limit then return fallback end
  return value
+end
+local function readHistory(key,index)
+ local fallback="Saved-data details unavailable."
+ if type(issecretvalue)~="function" then return fallback end
+ local fn=_G.MclarionWow_DashboardDetails
+ local ok,secret=pcall(issecretvalue,fn)
+ if not ok or secret or type(fn)~="function" then return fallback end
+ local success,text,count,selected=pcall(fn,key,index)
+ if not success then return fallback end
+ for _,value in ipairs({text,count,selected}) do
+  ok,secret=pcall(issecretvalue,value)
+  if not ok or type(secret)~="boolean" or secret then return fallback end
+ end
+ if type(text)~="string" or #text>32768 then return fallback end
+ if type(count)=="number" and count==math.floor(count) and count>=1 and count<=20 and
+    type(selected)=="number" and selected==math.floor(selected) and selected>=1 and selected<=count then
+  return text,count,selected
+ end
+ return text
 end
 local function measure(label,value)
  label:SetHeight(0);label:SetText(value);local height=math.max(14,label:GetStringHeight())
@@ -98,42 +119,59 @@ function MclarionWow_CreateDashboard(model)
   local y=-(i-1)*rowHeight
   local link=CreateFrame("Button",nil,rows,"UIPanelButtonTemplate")
   link:SetSize(selectorWidth,25);link:SetPoint("TOPLEFT",0,y);link:SetText(names[i]);links[i]=link
-  local check=CreateFrame("CheckButton",nil,rows,"UICheckButtonTemplate")
-  check:SetPoint("TOPLEFT",checkX,y);check:Show();checks[i]=check
-  if key~="combat" then
+  local check
+  if key~="spells" then
+   check=CreateFrame("CheckButton",nil,rows,"UICheckButtonTemplate")
+   check:SetPoint("TOPLEFT",checkX,y);check:Show();checks[i]=check
+  end
+  if key~="combat" and key~="spells" then
    local scan=CreateFrame("Button",nil,rows,"UIPanelButtonTemplate")
    scan:SetSize(67,25);scan:SetPoint("TOPLEFT",scanX,y);scan:SetText("Scan")
    scan:SetScript("OnClick",function() model.action(key);MclarionWow_DashboardRefresh() end)
   end
   statuses[i]=label(rows,"GameFontHighlight",statusWidth,"",statusLeft,y+statusY)
   summaries[i]=label(rows,"GameFontHighlight",statusWidth,"",statusLeft,y+summaryY)
-  check:SetScript("OnClick",function(self) model.toggle(key,self:GetChecked()==true);MclarionWow_DashboardRefresh() end)
+  if check then check:SetScript("OnClick",function(self) model.toggle(key,self:GetChecked()==true);MclarionWow_DashboardRefresh() end) end
  end
  local detailLabels={}
  for i=1,6 do
   local text=content:CreateFontString(nil,"OVERLAY",i==1 and "GameFontNormalLarge" or "GameFontHighlight")
   text:SetWidth(math.max(12,detailWidth-8));text:SetJustifyH("LEFT");detailLabels[i]=text
  end
+ local older=CreateFrame("Button",nil,content,"UIPanelButtonTemplate")
+ older:SetSize(66,23);older:SetPoint("TOPLEFT",0,0);older:SetText("Older")
+ local newer=CreateFrame("Button",nil,content,"UIPanelButtonTemplate")
+ newer:SetSize(66,23);newer:SetPoint("TOPRIGHT",0,0);newer:SetText("Newer")
+ local historyPosition=label(content,"GameFontHighlight",math.max(12,detailWidth-136),"",70,-3)
  local current=1
+ local positions={};local shownCount,shownIndex
  local function refresh()
   for i,key in ipairs(keys) do
    local state=model.status(key)
-   checks[i]:SetChecked(model.auto(key)==true)
+   if checks[i] then checks[i]:SetChecked(model.auto(key)==true) end
    local message=type(state.message)=="string" and state.message or "Status unavailable."
    local maxStatus=math.max(1,math.floor(statusWidth/7)-22)
    if #message>maxStatus then message=message:sub(1,math.max(1,maxStatus-3)).."..." end
-   measure(statuses[i],"Status: "..message.." | Auto: "..(checks[i]:GetChecked() and "on" or "off"))
+   measure(statuses[i],key=="spells" and "Status: opt-in via /vkmspells on" or "Status: "..message.." | Auto: "..(checks[i]:GetChecked() and "on" or "off"))
    local summary=safeRead("MclarionWow_DashboardSummary",key,240,"summary unavailable.")
    local maxSummary=math.max(1,math.floor(statusWidth/7)-16)
    if #summary>maxSummary then summary=summary:sub(1,math.max(1,maxSummary-3)).."..." end
    measure(summaries[i],"Stored data: "..summary)
   end
-  local state=model.status(keys[current]);local y=0
-  local values={names[current].."  ("..current.."/11)",
+  local state=model.status(keys[current]);local y=37
+  local key=keys[current]
+  local detailText,count,index=readHistory(key,positions[key])
+  shownCount,shownIndex=count,index
+  if count then
+   if positions[key] then positions[key]=index end
+   measure(historyPosition,"Saved "..index.." / "..count)
+   older:Show();newer:Show();historyPosition:Show()
+  else older:Hide();newer:Hide();historyPosition:Hide() end
+  local values={names[current].."  ("..current.."/"..#keys..")",
    "Auto-capture works with this window closed; no upload.\nCaptured: "..scopes[current],
-   "Triggers: "..triggers[current],names[current]..": "..(state.message or "Unavailable.").." | Auto: "..(checks[current]:GetChecked() and "on" or "off"),
+   "Triggers: "..triggers[current],key=="spells" and "Consent: /vkmspells on or /vkmspells off (off by default)." or names[current]..": "..(state.message or "Unavailable.").." | Auto: "..(checks[current]:GetChecked() and "on" or "off"),
    "Last request (memory): "..(state.attempt or "none this session").."\nLast success (memory, this session): "..(state.success or "none this session"),
-   "Stored observations:\n"..safeRead("MclarionWow_DashboardDetails",keys[current],32768,"Saved-data details unavailable.")}
+   "Stored observations:\n"..detailText}
   for i,value in ipairs(values) do
    local text=detailLabels[i];text:ClearAllPoints();text:SetPoint("TOPLEFT",0,-y)
    y=y+measure(text,value)+9
@@ -141,6 +179,15 @@ function MclarionWow_CreateDashboard(model)
   content:SetSize(detailWidth,math.max(detailHeight,y))
   detail:SetVerticalScroll(math.min(detail:GetVerticalScroll(),detail:GetVerticalScrollRange()))
  end
+ older:SetScript("OnClick",function()
+  if shownCount and shownIndex and shownIndex>1 then positions[keys[current]]=shownIndex-1;detail:SetVerticalScroll(0);refresh() end
+ end)
+ newer:SetScript("OnClick",function()
+  if shownCount and shownIndex and shownIndex<shownCount then
+   positions[keys[current]]=shownIndex+1<shownCount and shownIndex+1 or nil
+   detail:SetVerticalScroll(0);refresh()
+  end
+ end)
  local function navigate(index)
   if type(index)=="string" then
    local found

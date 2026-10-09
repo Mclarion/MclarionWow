@@ -29,6 +29,9 @@ class CandidatePackageTests(unittest.TestCase):
                     "MclarionWow/MclarionWow.lua", "MclarionWow/MclarionWow.toc",
                     "MclarionWowProgression/MclarionWowProgression.toc",
                     "MclarionWowProgression/QuestCapture.lua",
+                    "VaultkeeperMetadata/VaultkeeperMetadata.toc",
+                    "VaultkeeperMetadata/MetadataCapture.lua",
+                    "VaultkeeperMetadata/SpellEvents.lua",
                     "MclarionWowProgression/ReputationCapture.lua",
                     "MclarionWowProgression/WealthCapture.lua",
                     "MclarionWowProgression/HonorTitleCapture.lua",
@@ -39,8 +42,9 @@ class CandidatePackageTests(unittest.TestCase):
                 self.assertEqual(module.saved_variables(progression), ["MclarionWowQuestData", "MclarionWowReputationData", "MclarionWowWealthData", "MclarionWowHonorTitleData"])
                 self.assertEqual(module.dependencies(progression), ["MclarionWow"])
                 self.assertEqual(module.runtime_files(main), ["DashboardSummary.lua", "DashboardDetails.lua", "DashboardUI.lua", "MclarionWow.lua"])
-                self.assertIn("## Version: 0.12.5-candidate", main)
-                self.assertIn("## Version: 0.12.5-candidate", progression)
+                self.assertIn("## Version: 0.12.6-candidate", main)
+                self.assertIn("## Version: 0.12.6-candidate", progression)
+                self.assertIn("## Version: 0.12.6-candidate", archive.read("VaultkeeperMetadata/VaultkeeperMetadata.toc").decode())
                 self.assertEqual(module.runtime_files(progression), ["QuestCapture.lua", "ReputationCapture.lua", "WealthCapture.lua", "HonorTitleCapture.lua"])
                 for folder, toc in (("MclarionWow", main), ("MclarionWowProgression", progression)):
                     for script in module.runtime_files(toc):
@@ -49,6 +53,10 @@ class CandidatePackageTests(unittest.TestCase):
                                "WealthCapture.lua", "HonorTitleCapture.lua"):
                     self.assertEqual(archive.read("MclarionWowProgression/" + script),
                                      (ROOT / script).read_bytes())
+                self.assertEqual(module.saved_variables(archive.read("VaultkeeperMetadata/VaultkeeperMetadata.toc").decode()), ["VaultkeeperMetadataData"])
+                self.assertEqual(module.dependencies(archive.read("VaultkeeperMetadata/VaultkeeperMetadata.toc").decode()), ["MclarionWowProgression"])
+                self.assertEqual(archive.read("VaultkeeperMetadata/MetadataCapture.lua"), (ROOT / "VaultkeeperMetadata/MetadataCapture.lua").read_bytes())
+                self.assertEqual(archive.read("VaultkeeperMetadata/SpellEvents.lua"), (ROOT / "VaultkeeperMetadata/SpellEvents.lua").read_bytes())
                 for script in ("DashboardSummary.lua", "DashboardDetails.lua", "DashboardUI.lua", "MclarionWow.lua"):
                     self.assertEqual(archive.read("MclarionWow/" + script),
                                      (ROOT / script).read_bytes())

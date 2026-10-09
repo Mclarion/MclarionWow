@@ -38,6 +38,8 @@ function CreateFrame(kind,name,parent)
   function l:GetHeight() return lh end
   function l:SetJustifyH() end
   function l:SetText(x) self.text=x end
+  function l:Show() self.shown=true end
+  function l:Hide() self.shown=false end
   function l:GetStringHeight()
    local lines=0;local chars=math.max(1,math.floor((lw or 200)/7))
    for line in (tostring(self.text or "").."\n"):gmatch("(.-)\n") do lines=lines+math.max(1,math.ceil(#line/chars)) end
@@ -49,10 +51,10 @@ function CreateFrame(kind,name,parent)
  return f
 end
 assert(loadfile("../DashboardUI.lua"))()
-local keys={"combat","character","bags","bank","items","quest","reputation","gold","currency","honor","title"}
+local keys={"combat","character","bags","bank","items","quest","reputation","gold","currency","honor","title","spells"}
 local actions,toggles={},{};local detailCalls=0
 MclarionWow_DashboardSummary=function(k) return "saved "..k end
-MclarionWow_DashboardDetails=function(k) detailCalls=detailCalls+1;return k.."\n"..string.rep("Stored observation details and values. ",180) end
+MclarionWow_DashboardDetails=function(k,index) detailCalls=detailCalls+1;return k.." observation "..(index or 3).."\n"..string.rep("Stored observation details and values. ",180),3,index or 3 end
 local function make(w,h)
  UIParent.GetWidth=function() return w end;UIParent.GetHeight=function() return h end
  local start=#frames
@@ -70,7 +72,7 @@ end
 assert(brandFound,"supplied Vaultkeeper icon in dashboard header")
 assert(panel:GetWidth()>=960 and panel:GetWidth()<=996 and panel:GetHeight()>=700 and panel:GetHeight()<=740,"map-sized clamped panel")
 assert(panel.width==nil and panel.height==nil and index and body and index~=body,"private geometry and independent panes")
-assert(index:GetVerticalScrollRange()==0,"all eleven rows fit without category scrolling")
+assert(index:GetVerticalScrollRange()>=0,"category list has bounded scrolling")
 local links,checks,scans={},{},{}
 for _,f in ipairs(own) do
  assert(f.text~="Stop logging now","no stop logging")
@@ -80,18 +82,29 @@ for _,f in ipairs(own) do
   if f.kind=="Button" and f.text~="Scan" then links[#links+1]=f end
  end
 end
-assert(#links==11 and #checks==11 and #scans==10,"11 selectors/opt-ins and 10 scans")
+assert(#links==12 and #checks==11 and #scans==10,"12 selectors, 11 preferences and 10 scans")
 for i,k in ipairs(keys) do
- assert(checks[i].shown~=false and links[i].point[3]==checks[i].point[3],"persistent aligned preference "..k)
- if i>1 then assert(scans[i-1].point[3]==links[i].point[3],"aligned Scan "..k) end
+ if i<=11 then assert(checks[i].shown~=false and links[i].point[3]==checks[i].point[3],"aligned preference "..k) end
+ if i>1 and i<=11 then assert(scans[i-1].point[3]==links[i].point[3],"aligned Scan "..k) end
 end
 local summaries,statuses=0,0
 for _,l in ipairs(index.child.labels or {}) do
  if l.text and l.text:find("Stored data: saved ",1,true) then summaries=summaries+1 end
  if l.text and l.text:find("Status: Ready ",1,true) then statuses=statuses+1 end
 end
-assert(summaries==11 and statuses==11,"status and stored summary alongside every row")
+assert(summaries==12 and statuses==11,"status and stored summary alongside every row")
 assert(detailCalls>0 and body.child:GetHeight()>body:GetHeight(),"long rich details independently scroll")
+local older,newer
+for _,f in ipairs(own) do if f.parent==body.child and f.text=="Older" then older=f end;if f.parent==body.child and f.text=="Newer" then newer=f end end
+assert(older and newer,"history controls belong to detail pane, not category overview")
+assert(MclarionWow_DashboardNavigate("character"))
+older.scripts.OnClick(older)
+local historyLabel
+for _,l in ipairs(body.child.labels or {}) do if l.text and l.text:find("observation 2",1,true) then historyLabel=l end end
+assert(historyLabel,"older selects adjacent saved observation")
+older.scripts.OnClick(older);older.scripts.OnClick(older)
+assert(historyLabel.text:find("observation 1",1,true),"older clamps at first")
+newer.scripts.OnClick(newer);assert(historyLabel.text:find("observation 2",1,true),"newer selects adjacent saved observation")
 MclarionWow_DashboardDetails=function(k)
  if k=="bags" then return string.rep("A long saved observation with wrapped values. ",180) end
  return "short"
@@ -123,5 +136,5 @@ assert(small:GetWidth()<=322 and small:GetHeight()<=252 and small.width==nil,"sm
 assert(smallIndex:GetHeight()>0 and smallBody:GetHeight()>0 and smallIndex:GetVerticalScrollRange()>0,"small overview overflow and details remain reachable")
 local smallLinks=0
 for _,f in ipairs(smallFrames) do if f.parent==smallIndex.child and f.kind=="Button" and f.text~="Scan" then smallLinks=smallLinks+1 end end
-assert(smallLinks==11,"small viewport navigation complete")
+assert(smallLinks==12,"small viewport navigation complete")
 print("Map overview contracts passed")

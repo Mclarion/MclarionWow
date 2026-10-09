@@ -364,7 +364,7 @@ local function honorTitle(kind,guid)
     if kind=="honor" then return "Honor latest saved: "..n.." observations; "..a.." lifetime honorable kills (not earned honor)." end
     return "Title latest saved: "..n.." observations; "..a.." known titles; "..(b==0 and "none selected" or "selected").." (no acquisition dates)."
 end
-local allowed={character=true,bags=true,bank=true,items=true,combat=true,quest=true,reputation=true,gold=true,currency=true,honor=true,title=true}
+local allowed={character=true,bags=true,bank=true,items=true,combat=true,quest=true,reputation=true,gold=true,currency=true,honor=true,title=true,spells=true}
 local function summary(key)
     if not safe(key) or type(key)~="string" or #key>20 or not allowed[key] then return "Summary unavailable." end
     if key=="combat" then return "Combat: native file; no addon observations or saved count." end
@@ -373,6 +373,15 @@ local function summary(key)
     if not safe(fn) or type(fn)~="function" then return key..": unavailable" end
     local ok,guid=pcall(fn,"player")
     if not ok or not owner(guid) then return key..": unavailable" end
+    if key=="spells" then
+        local buildFn,rowsFn=GetBuildInfo,MclarionWow_MetadataSpellRows
+        if not safe(buildFn) or type(buildFn)~="function" or not safe(rowsFn) or type(rowsFn)~="function" then return "Spells: metadata addon unavailable." end
+        local got,_,build=pcall(buildFn)
+        if not got or not safe(build) or type(build)~="string" or not build:match("^[1-9]%d*$") then return "Spells: metadata unavailable." end
+        local yes,rows=pcall(rowsFn,tonumber(build),guid)
+        if not yes or not safe(rows) or type(rows)~="table" or #rows>400 then return "Spells: metadata unavailable." end
+        return "Spells: "..#rows.." cast-observed labels for this observer/build/locale; no cast history."
+    end
     local result
     if key=="character" or key=="bags" or key=="bank" or key=="items" then result=legacy(key,guid)
     elseif key=="quest" or key=="reputation" then result=progression(key,guid)

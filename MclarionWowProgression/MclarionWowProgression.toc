@@ -3,7 +3,7 @@
 ## Title: Vaultkeeper Progression
 ## Notes: Opt-in local quest, reputation, wealth, PvP and title observations; requires Vaultkeeper.
 ## Author: Mclarion
-## Version: 0.12.5-candidate
+## Version: 0.12.6-candidate
 ## Dependencies: MclarionWow
 ## SavedVariables: MclarionWowQuestData, MclarionWowReputationData, MclarionWowWealthData, MclarionWowHonorTitleData
 

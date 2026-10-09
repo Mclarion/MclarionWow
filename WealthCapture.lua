@@ -257,6 +257,15 @@ local function capture(kind,manual)
   if not called or not num(copper,0,9007199254740991) then return nil,"Money balance unavailable." end
   record={at=stamp,build=build,copper=copper}
  else view,reason=scan();if not view then return nil,reason end end
+ local function enrich()
+  if kind~="currency" then return end
+  local fn=MclarionWow_EnrichObserved
+  if sec(fn) or type(fn)~="function" then return end
+  local ids={}
+  for _,e in ipairs(view.char) do ids[#ids+1]=e.id end
+  for _,e in ipairs(view.account) do ids[#ids+1]=e.id end
+  pcall(fn,"currency",ids,owner,stamp,build)
+ end
  local still,_,_,check=context()
  if not still or still~=owner then return nil,check or "Wealth owner changed." end
  local group=root.characters[owner]
@@ -274,6 +283,7 @@ local function capture(kind,manual)
   local accountChanged,accountStatus=append(root.accountCurrency,a,"account")
   if changed then group.currency=h;root.characters[owner]=group end
   if not changed and not accountChanged then
+   enrich()
    if status=="same-second" or accountStatus=="same-second" then return true,"same-second" end
    return true,"unchanged"
   end
@@ -285,6 +295,7 @@ local function capture(kind,manual)
  local final,_,_,finalReason=context()
  if not final or final~=owner then return nil,finalReason or "Wealth owner changed." end
  MclarionWowWealthData=root
+ enrich()
  return true,"saved"
 end
 function MclarionWow_CaptureGold(manual) local ok,v,why=pcall(capture,"gold",manual);if not ok then return nil,"Gold capture unavailable." end;return v,why end

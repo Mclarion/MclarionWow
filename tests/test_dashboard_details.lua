@@ -32,7 +32,7 @@ reset()
 local keys={"character","bags","bank","items","combat","quest","reputation","gold","currency","honor","title"}
 for _,k in ipairs(keys) do check(k,{k=="combat" and "native" or "no observation"}) end
 MclarionWowData.characters[A]={wire("MHWOW1",100,"Older","Realm","MAGE","59","1","Old",gear(),"70204"),wire("MHWOW2",101,"S%7C%7CcBAD","R%25","MAGE","60","2","Zone%7CNew",gear(),"70205","Alliance","Dwarf","Male")}
-check("character",{"2 retained observations","101","70205","S||||cBAD","level 60","map ID 2","Zone||New","slot 1: item ID 42","Alliance","Dwarf","Male"},{"Old"})
+check("character",{"2 retained observations","101","70205","S||||cBAD","level 60","map ID 2","Zone||New","slot 1: item ID 42","Alliance","Dwarf","Male","Old -> Zone||New"})
 for _,text in ipairs({"Bad%2G","Bad%7","Bad%", "Bad%7C%2G"}) do
  MclarionWowData.characters[A][2]=wire("MHWOW2",101,text,"Realm","MAGE","60","2","Zone",gear(),"70205","Alliance","Dwarf","Male")
  check("character",{"unavailable"},{"Name Bad"})
@@ -40,7 +40,7 @@ end
 MclarionWowData.characters[A][2]=wire("MHWOW2",101,"Literal%252G%25","Realm","MAGE","60","2","Zone",gear(),"70205","Alliance","Dwarf","Male")
 check("character",{"Literal%2G%"})
 MclarionWowData.bags[A]={wire("MHWOWB1",100,"10:1","70204"),wire("MHWOWB1",101,"10:2,20:3","70205")}
-check("bags",{"2 retained observations","item ID 10: 2","item ID 20: 3","101","70205"},{"10: 1"})
+check("bags",{"2 retained observations","item ID 10: 2","item ID 20: 3","101","70205","item ID 10: 1 -> 2"})
 for _,entries in ipairs({"10:2,10:3","20:3,10:2"}) do
  MclarionWowData.bags[A][2]=wire("MHWOWB1",101,entries,"70205")
  check("bags",{"unavailable"},{"item ID 10"})
@@ -98,4 +98,41 @@ assert(MclarionWowData.bags[A][1]==wire("MHWOWB1",101,"10:2","70205"))
 local first,second={},{};for i=1,100 do first[i]=item(i,string.rep("Long",10));second[i]=item(i+100,string.rep("Long",10)) end
 MclarionWowData.items[A]={bank={meta(101,table.concat(first,";")),meta(102,table.concat(second,";"))}}
 local bounded=check("items",{"Truncated"});assert(#bounded<=32768)
+-- Read-only metadata overlay is same-build/locale/observer and markup-safe.
+if _VERSION=="Lua 5.1" then assert(loadfile("../VaultkeeperMetadata/MetadataCapture.lua"))()
+else assert(loadfile("../VaultkeeperMetadata/MetadataCapture.lua","t",_G))() end
+reset();GetLocale=function() return "enUS" end
+MclarionWowReputationData.characters[A]={wire("MHWOWR1",101,"70205","visible-ui","1","1","0","0","17:4:0:3000:1200")}
+VaultkeeperMetadataData={schema=1,records={}}
+VaultkeeperMetadataData.records["reputation:17:70205:enUS"]={entityType="reputation",id=17,build=70205,locale="enUS",observedAt=101,observedBy=A,scope="character",name="|cffff0000Guild",description="|Hbad|h"}
+check("reputation",{"faction ID 17 — ||cffff0000Guild", "||Hbad||h", "value 1200"},{"faction ID 17: standing"})
+local previous=VaultkeeperMetadataData
+C_Reputation={GetFactionDataByID=function() error("read-only display called API") end}
+check("reputation",{"||cffff0000Guild"});assert(VaultkeeperMetadataData==previous)
+VaultkeeperMetadataData.records["reputation:17:70205:enUS"].observedBy=B
+check("reputation",{"faction ID 17: standing"},{"Guild"})
+VaultkeeperMetadataData.records["reputation:17:70205:enUS"].observedBy=A
+GetLocale=function() return "frFR" end
+check("reputation",{"faction ID 17: standing"},{"Guild"})
+GetLocale=function() return "enUS" end
+VaultkeeperMetadataData.bad=true
+check("reputation",{"faction ID 17: standing"},{"Guild"})
+VaultkeeperMetadataData={schema=1,records={
+ ["spell:116:70205:enUS:"..A]={entityType="spell",id=116,build=70205,locale="enUS",observedAt=101,
+ observedBy=A,scope="character",name="|cffSpell",description="|Hcast|h",iconFileID=1234,
+ descriptionProvenance="player-spellcast:C_Spell.GetSpellDescription"}}}
+GetBuildInfo=function() return "1.60.1","70205" end
+local spellText=check("spells",{"spell ID 116", "||cffSpell", "||Hcast||h", "not learned spells"})
+assert(#spellText<=32768)
+GetBuildInfo=function() return "1.60.1","70245" end
+check("spells",{"No observed spell metadata"},{"Spell"})
+GetBuildInfo=function() return "1.60.1","70205" end
+VaultkeeperMetadataData.records["spell:116:70205:enUS:"..A].observedBy=B
+check("spells",{"unavailable"},{"Spell"}) -- malformed key/observer pair invalidates the root
+VaultkeeperMetadataData.records["spell:116:70205:enUS:"..A].observedBy=A
+VaultkeeperMetadataData.records["spell:116:70205:enUS:"..B]={entityType="spell",id=116,build=70205,locale="enUS",observedAt=102,
+ observedBy=B,scope="character",name="OtherSpell",description="Other text",
+ descriptionProvenance="player-spellcast:C_Spell.GetSpellDescription"}
+check("spells",{"||cffSpell"},{"OtherSpell","Other text"})
+who=B;check("spells",{"OtherSpell","Other text"},{"||cffSpell","||Hcast||h"})
 print("dashboard details synthetic checks passed")
